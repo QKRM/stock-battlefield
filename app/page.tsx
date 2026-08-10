@@ -176,6 +176,76 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
         context.fillStyle = armor; context.beginPath(); context.arc(direction*s*.06,-s*1.86,s*.3,Math.PI,Math.PI*2); context.fill();
         context.restore();
       };
+      const artillery = (x: number, z: number, color: "red" | "green", recoil: number) => {
+        tank(x, z, color, 0);
+        const base = project(x, z);
+        const direction = color === "red" ? 1 : -1;
+        const s = (10 + z * 5) * base.scale;
+        const bright = color === "green" ? "#7affb6" : "#ff7c87";
+        context.save();
+        context.strokeStyle = bright;
+        context.lineCap = "round";
+        context.lineWidth = Math.max(2, s * .23);
+        context.beginPath();
+        context.moveTo(base.x + direction * s * .05, base.y - s * .86);
+        context.lineTo(base.x + direction * s * (2.25 - recoil * .2), base.y - s * 1.48);
+        context.stroke();
+        context.fillStyle = bright;
+        context.beginPath();
+        context.arc(base.x + direction * s * (2.28 - recoil * .2), base.y - s * 1.49, Math.max(1.5, s * .18), 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      };
+      const truck = (x: number, z: number, color: "red" | "green", bounce: number) => {
+        const base = project(x, z);
+        const direction = color === "red" ? 1 : -1;
+        const s = (8.5 + z * 4) * base.scale;
+        const bright = color === "green" ? "#55e89a" : "#f26370";
+        const body = color === "green" ? "#1d6240" : "#702b34";
+        const y = base.y - bounce * base.scale;
+        context.save();
+        context.fillStyle = "rgba(0,0,0,.48)";
+        context.beginPath(); context.ellipse(base.x, y + s * .42, s * 1.35, s * .28, 0, 0, Math.PI * 2); context.fill();
+        context.fillStyle = body;
+        context.fillRect(base.x - s * 1.2, y - s * .58, s * 1.55, s * .72);
+        context.fillStyle = bright;
+        context.fillRect(base.x + direction * s * .35, y - s * .72, direction * s * .62, s * .86);
+        context.fillStyle = "#08100b";
+        context.fillRect(base.x + direction * s * .47, y - s * .58, direction * s * .34, s * .28);
+        context.fillStyle = "#090b0a";
+        for (const wheel of [-.78, .62]) { context.beginPath(); context.arc(base.x + wheel * s, y + s * .24, s * .25, 0, Math.PI * 2); context.fill(); }
+        context.strokeStyle = `${bright}99`; context.lineWidth = 1;
+        for(let rib=-1;rib<.2;rib+=.3){context.beginPath();context.moveTo(base.x+rib*s,y-s*.57);context.lineTo(base.x+rib*s,y+s*.08);context.stroke();}
+        context.restore();
+      };
+      const drone = (x: number, z: number, color: "red" | "green", phase: number) => {
+        const base = project(x, z, .23 + Math.sin(phase) * .035);
+        const s = (5 + z * 4) * base.scale;
+        const bright = color === "green" ? "#79ffb8" : "#ff7d88";
+        context.save();
+        context.translate(base.x, base.y);
+        context.rotate(Math.sin(phase * .7) * .08);
+        context.strokeStyle = bright; context.lineWidth = Math.max(1,s*.18);
+        context.beginPath(); context.moveTo(-s,0); context.lineTo(s,0); context.moveTo(0,-s*.62); context.lineTo(0,s*.62); context.stroke();
+        context.fillStyle = bright; context.beginPath(); context.ellipse(0,0,s*.35,s*.24,0,0,Math.PI*2); context.fill();
+        for(const [rx,ry] of [[-s,0],[s,0],[0,-s*.62],[0,s*.62]]){context.strokeStyle=`${bright}88`;context.beginPath();context.ellipse(rx,ry,s*.42,s*.12,phase,0,Math.PI*2);context.stroke();}
+        context.restore();
+      };
+      const helicopter = (x: number, z: number, color: "red" | "green", phase: number) => {
+        const base = project(x, z, .38 + Math.sin(phase * .8) * .025);
+        const direction = color === "red" ? 1 : -1;
+        const s = (8 + z * 5) * base.scale;
+        const bright = color === "green" ? "#69f2a7" : "#f66c78";
+        const body = color === "green" ? "#1b6941" : "#7b2a34";
+        context.save();
+        context.fillStyle="rgba(0,0,0,.32)";context.beginPath();context.ellipse(base.x,base.y+s*2.8,s*1.4,s*.25,0,0,Math.PI*2);context.fill();
+        context.fillStyle=body;context.beginPath();context.ellipse(base.x,base.y,s*.9,s*.5,0,0,Math.PI*2);context.fill();
+        polygon([{x:base.x-direction*s*.55,y:base.y-s*.12},{x:base.x-direction*s*2.05,y:base.y-s*.36},{x:base.x-direction*s*2.15,y:base.y-s*.12},{x:base.x-direction*s*.55,y:base.y+s*.16}],body);
+        context.fillStyle=bright;context.beginPath();context.ellipse(base.x+direction*s*.45,base.y-s*.08,s*.35,s*.28,0,0,Math.PI*2);context.fill();
+        context.strokeStyle=`${bright}bb`;context.lineWidth=Math.max(1,s*.12);context.beginPath();context.moveTo(base.x-s*2.15,base.y-s*.75);context.lineTo(base.x+s*2.15,base.y+s*.75);context.stroke();
+        context.strokeStyle=bright;context.beginPath();context.arc(base.x-direction*s*2.05,base.y-s*.25,s*.45,phase,phase+Math.PI*1.7);context.stroke();
+        context.restore();
+      };
       context.save();
       context.beginPath();
       context.moveTo(0, horizon);
@@ -238,24 +308,48 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
         block(front + .085 + clash, z, scale, 20 + ((row * 11) % 20), "green", .9);
       }
 
-      // Tanks and infantry continuously charge, fall back and regroup.
+      const volumeLoad = Math.min(1.35, Math.max(.18, session.volume / 4000000));
+      // The visible force grows with cumulative traded volume.
       for (let row = 0; row < 8; row += 1) {
         const z = .16 + row * .105;
         const front = frontAt(z);
-        for (let unit = 0; unit < 7; unit += 1) {
+        const unitCount = 3 + Math.floor(volumeLoad * 5);
+        for (let unit = 0; unit < unitCount; unit += 1) {
           const depthPhase = (time * (.16 + (unit % 3) * .025) + row * .23 + unit * .31) % 1;
           const redHome = -.92 + unit * .105;
           const greenHome = .92 - unit * .105;
           const redAdvance = Math.min(front - .15, redHome + depthPhase * .34 * (1 - pressure * .45));
           const greenAdvance = Math.max(front + .15, greenHome - depthPhase * .34 * (1 + pressure * .45));
           const bob = Math.abs(Math.sin(time * 5 + unit + row));
-          if (unit % 3 === 0) {
+          const unitType = (unit + row * 2) % 8;
+          if (unitType === 0 || unitType === 6) {
             tank(redAdvance, z + .012, "red", bob * 1.3);
             tank(greenAdvance, z + .026, "green", bob * 1.3);
+          } else if (unitType === 4 && volumeLoad > .5) {
+            artillery(redAdvance, z + .012, "red", bob);
+            artillery(greenAdvance, z + .026, "green", bob);
+          } else if (unitType === 2 && volumeLoad > .32) {
+            truck(redAdvance, z + .012, "red", bob);
+            truck(greenAdvance, z + .026, "green", bob);
           } else {
             soldier(redAdvance, z + (unit % 2) * .025, "red", Math.sin(time * 7 + unit) * 1.2);
             soldier(greenAdvance, z + ((unit + 1) % 2) * .025, "green", Math.sin(time * 7 + unit + 2) * 1.2);
           }
+        }
+      }
+
+      const airCount = Math.floor(Math.max(0, volumeLoad - .36) * 7);
+      for (let i = 0; i < airCount; i += 1) {
+        const z = .18 + (i % 4) * .18;
+        const orbit = Math.sin(time * .42 + i * 1.9) * .16;
+        const redX = -.48 + orbit - pressure * .12;
+        const greenX = .48 - orbit - pressure * .12;
+        if (i % 3 === 2 && volumeLoad > .75) {
+          helicopter(redX, z, "red", time * 4 + i);
+          helicopter(greenX, z + .035, "green", time * 4 + i + 1);
+        } else {
+          drone(redX, z, "red", time * 5 + i);
+          drone(greenX, z + .025, "green", time * 5 + i + 2);
         }
       }
 
@@ -372,6 +466,7 @@ export default function Home() {
   const buyPressure = Math.max(18, Math.min(82, 50 + changeRate * 5.4));
   const sellPressure = 100 - buyPressure;
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
+  const forceTier = activeSession.volume > 2800000 ? "총력전 · 공중전력 투입" : activeSession.volume > 1500000 ? "대규모 기계화 증원" : activeSession.volume > 600000 ? "장갑·보급 부대 투입" : "초기 보병 교전";
 
   return (
     <div className="app-shell">
@@ -415,7 +510,7 @@ export default function Home() {
           <div className="scene-grid" />
           <div className="scene-top-left"><b>KST {live ? now.toLocaleTimeString("ko-KR", { hour12: false }) : replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour12: false }) : "09:00:00"}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
           <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
-          <div className="scene-pressure"><small>MARKET PRESSURE</small><strong>{pressureLabel}</strong><span>{changeRate >= 0 ? "매수세가 전선을 밀어 올리고 있습니다" : "매도세가 전선을 압박하고 있습니다"}</span></div>
+          <div className="scene-pressure"><small>MARKET PRESSURE</small><strong>{pressureLabel}</strong><span>{forceTier}</span></div>
           <div className="wall-label sell"><small>SELL WALL</small><strong>{sellPressure.toFixed(1)}%</strong><span>매도 압력</span></div>
           <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>
           <div className="live-badge"><span /> {live ? (data.quote.marketStatus === "OPEN" ? "LIVE MARKET" : "LATEST CLOSE") : "HISTORICAL"}</div>
