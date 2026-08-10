@@ -85,10 +85,10 @@ function formatDate(value: string) {
   return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function MarketScene({ session, live, bookPressure, depthProfile }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] } }) {
+function MarketScene({ session, live, bookPressure, depthProfile, priceLevels }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] }; priceLevels: { current: number; asks: Array<{ price: number; quantity: number }>; bids: Array<{ price: number; quantity: number }> } }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sceneState = useRef({ session, live, bookPressure, depthProfile });
-  sceneState.current = { session, live, bookPressure, depthProfile };
+  const sceneState = useRef({ session, live, bookPressure, depthProfile, priceLevels });
+  sceneState.current = { session, live, bookPressure, depthProfile, priceLevels };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -100,7 +100,7 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
     let smoothPressure = sceneState.current.bookPressure;
 
     const draw = () => {
-      const { session, live, bookPressure, depthProfile } = sceneState.current;
+      const { session, live, bookPressure, depthProfile, priceLevels } = sceneState.current;
       smoothPressure += (bookPressure - smoothPressure) * .035;
       const rect = canvas.getBoundingClientRect();
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -377,6 +377,64 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
       }
       context.setLineDash([]);
 
+      const drawGroundPrice = (x: number, y: number, label: string, color: string, align: "left" | "right") => {
+        const fontSize = Math.max(8, Math.min(12, 8 + (y - horizon) / Math.max(1, height - horizon) * 5));
+        context.font = `700 ${fontSize}px ${getComputedStyle(document.body).fontFamily}`;
+        context.textAlign = align;
+        context.textBaseline = "middle";
+        const metrics = context.measureText(label);
+        const boxWidth = metrics.width + 10;
+        context.fillStyle = "rgba(4,8,6,.78)";
+        context.fillRect(align === "left" ? x - 4 : x - boxWidth + 4, y - fontSize * .8, boxWidth, fontSize * 1.55);
+        context.strokeStyle = `${color}88`;
+        context.lineWidth = 1;
+        context.strokeRect(align === "left" ? x - 4 : x - boxWidth + 4, y - fontSize * .8, boxWidth, fontSize * 1.55);
+        context.fillStyle = color;
+        context.shadowBlur = 8;
+        context.shadowColor = color;
+        context.fillText(label, x, y);
+        context.shadowBlur = 0;
+      };
+
+      // Actual quote prices are printed directly beside their battlefield lanes.
+      for (let i = 0; i < 5; i += 1) {
+        const z = .15 + i * .16;
+        const front = frontAt(z);
+        const ask = priceLevels.asks[i];
+        const bid = priceLevels.bids[i];
+        const askPoint = project(front - .2 - i * .008, z, .025);
+        const bidPoint = project(front + .2 + i * .008, z + .018, .025);
+        const frontPoint = project(front, z, .02);
+        context.strokeStyle = "rgba(255,255,255,.2)";
+        context.lineWidth = 1;
+        context.beginPath(); context.moveTo(frontPoint.x, frontPoint.y); context.lineTo(askPoint.x, askPoint.y); context.moveTo(frontPoint.x, frontPoint.y); context.lineTo(bidPoint.x, bidPoint.y); context.stroke();
+        if (ask) drawGroundPrice(askPoint.x - 5, askPoint.y, `매도 ${Math.round(ask.price).toLocaleString("ko-KR")}`, "#ff8791", "right");
+        if (bid) drawGroundPrice(bidPoint.x + 5, bidPoint.y, `매수 ${Math.round(bid.price).toLocaleString("ko-KR")}`, "#73f2ab", "left");
+      }
+
+      for (const z of [.26, .52, .78, .94]) {
+        const point = project(frontAt(z), z, .055);
+        const before = project(frontAt(Math.max(0, z - .02)), Math.max(0, z - .02), .055);
+        const after = project(frontAt(Math.min(1, z + .02)), Math.min(1, z + .02), .055);
+        const angle = Math.atan2(after.y - before.y, after.x - before.x) - Math.PI / 2;
+        const text = `현재 ${Math.round(priceLevels.current).toLocaleString("ko-KR")}원`;
+        context.save();
+        context.translate(point.x, point.y);
+        context.rotate(angle);
+        context.font = `800 ${9 + z * 4}px ${getComputedStyle(document.body).fontFamily}`;
+        context.textAlign = "center";
+        const width = context.measureText(text).width + 12;
+        context.fillStyle = "rgba(5,10,7,.88)";
+        context.fillRect(-width / 2, -10, width, 19);
+        context.strokeStyle = "rgba(208,255,225,.68)";
+        context.strokeRect(-width / 2, -10, width, 19);
+        context.fillStyle = "#f2fff7";
+        context.shadowBlur = 10;
+        context.shadowColor = "#87ffb7";
+        context.fillText(text, 0, 1);
+        context.restore();
+      }
+
       // Paired walls travel back and forth across the battlefield.
       for (let row = 0; row < 12; row += 1) {
         const z = .08 + row * .075;
@@ -598,6 +656,8 @@ export default function Home() {
   const sellPressure = 100 - buyPressure;
   const bookPressure = Math.max(-1, Math.min(1, (buyPressure - 50) / 34));
   const maxBookQuantity = Math.max(1, ...bookLevels.flatMap((level) => [level.ask.quantity, level.bid.quantity]));
+  const bestAsk = bookLevels[0]?.ask.price ?? quotePrice + 1000;
+  const bestBid = bookLevels[0]?.bid.price ?? quotePrice - 1000;
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
   const forceTier = activeSession.volume > 2800000 ? "총력전 · 공중전력 투입" : activeSession.volume > 1500000 ? "대규모 기계화 증원" : activeSession.volume > 600000 ? "장갑·보급 부대 투입" : "초기 보병 교전";
 
@@ -639,13 +699,14 @@ export default function Home() {
         </div>}
 
         <section className="battlefield" aria-label="SK하이닉스 시장 전장">
-          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} />
+          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} priceLevels={{ current: quotePrice, asks: bookLevels.map((level) => level.ask), bids: bookLevels.map((level) => level.bid) }} />
           <div className="scene-grid" />
           <div className="scene-top-left"><b>KST {live ? now.toLocaleTimeString("ko-KR", { hour12: false }) : replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour12: false }) : "09:00:00"}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
           <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
           <div className="scene-pressure"><small>MARKET PRESSURE</small><strong>{pressureLabel}</strong><span>{forceTier}</span></div>
           <div className="wall-label sell"><small>SELL WALL</small><strong>{sellPressure.toFixed(1)}%</strong><span>매도 압력</span></div>
           <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>
+          <div className="front-quote-strip"><span className="ask">매도 1호가 <b>{won(bestAsk)}</b></span><strong>현재 전선 <em>{won(quotePrice)}</em></strong><span className="bid">매수 1호가 <b>{won(bestBid)}</b></span></div>
           <div className="live-badge"><span /> {live ? (data.quote.marketStatus === "OPEN" ? "LIVE MARKET" : "LATEST CLOSE") : "HISTORICAL"}</div>
 
           <div className="floating-panels">
