@@ -26,6 +26,11 @@ type MarketData = {
     marketStatus: string;
   };
   sessions: Session[];
+  orderBook: {
+    asks: Array<{ price: number; quantity: number }>;
+    bids: Array<{ price: number; quantity: number }>;
+    delayed: boolean;
+  };
   source: string;
 };
 
@@ -63,6 +68,11 @@ const fallbackData: MarketData = {
     marketStatus: "CLOSE",
   },
   sessions: fallbackSessions,
+  orderBook: {
+    asks: Array.from({ length: 5 }, (_, index) => ({ price: fallbackSessions.at(-1)!.close + (index + 1) * 1000, quantity: 1800 + index * 730 })),
+    bids: Array.from({ length: 5 }, (_, index) => ({ price: fallbackSessions.at(-1)!.close - (index + 1) * 1000, quantity: 2400 + index * 640 })),
+    delayed: true,
+  },
   source: "DEMO FEED",
 };
 
@@ -75,8 +85,10 @@ function formatDate(value: string) {
   return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function MarketScene({ session, live }: { session: Session; live: boolean }) {
+function MarketScene({ session, live, bookPressure, depthProfile }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] } }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sceneState = useRef({ session, live, bookPressure, depthProfile });
+  sceneState.current = { session, live, bookPressure, depthProfile };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -85,8 +97,11 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
     if (!context) return;
     let animation = 0;
     let frame = 0;
+    let smoothPressure = sceneState.current.bookPressure;
 
     const draw = () => {
+      const { session, live, bookPressure, depthProfile } = sceneState.current;
+      smoothPressure += (bookPressure - smoothPressure) * .035;
       const rect = canvas.getBoundingClientRect();
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       if (canvas.width !== rect.width * ratio || canvas.height !== rect.height * ratio) {
@@ -99,7 +114,7 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
       context.clearRect(0, 0, width, height);
 
       const time = frame * (live ? 0.016 : 0.011);
-      const pressure = Math.max(-1, Math.min(1, session.change / 5));
+      const pressure = Math.max(-1, Math.min(1, smoothPressure));
       const buyPower = .5 + pressure * .34;
       const frontlineShift = -pressure * .33;
       const sky = context.createLinearGradient(0, 0, 0, height);
@@ -304,8 +319,10 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
         const front = frontAt(z);
         const clash = Math.sin(time * 2.5 + row * .8) * .018;
         const scale = 10 + z * 13;
-        block(front - .085 - clash, z, scale, 20 + ((row * 7) % 18), "red", .86);
-        block(front + .085 + clash, z, scale, 20 + ((row * 11) % 20), "green", .9);
+        const askDepth = depthProfile.asks[row % Math.max(1, depthProfile.asks.length)] ?? .5;
+        const bidDepth = depthProfile.bids[row % Math.max(1, depthProfile.bids.length)] ?? .5;
+        block(front - .085 - clash, z, scale, 13 + askDepth * 34, "red", .86);
+        block(front + .085 + clash, z, scale, 13 + bidDepth * 34, "green", .9);
       }
 
       const volumeLoad = Math.min(1.35, Math.max(.18, session.volume / 4000000));
@@ -379,7 +396,7 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
     };
     draw();
     return () => cancelAnimationFrame(animation);
-  }, [session, live]);
+  }, []);
 
   return <canvas ref={canvasRef} className="battle-canvas" aria-label="SK하이닉스 매수·매도 압력 시각화" />;
 }
@@ -398,7 +415,7 @@ export default function Home() {
       if (!response.ok) throw new Error("market feed unavailable");
       const next = (await response.json()) as MarketData;
       if (next.sessions?.length) {
-        setData(next);
+        setData({ ...next, orderBook: next.orderBook?.asks?.length && next.orderBook?.bids?.length ? next.orderBook : fallbackData.orderBook });
         setConnected(true);
       }
     } catch {
@@ -437,16 +454,27 @@ export default function Home() {
           setReplayPlaying(false);
           return current;
         }
-        return current + 1;
+        return Math.min(session.points.length - 1, current + .25);
       });
-    }, 220);
+    }, 50);
     return () => window.clearInterval(timer);
   }, [live, replayPlaying, session.points.length]);
 
   const replaySession = useMemo(() => {
     if (live || !session.points.length) return session;
-    const end = Math.min(replayIndex, session.points.length - 1);
+    const cursor = Math.min(replayIndex, session.points.length - 1);
+    const end = Math.floor(cursor);
+    const fraction = cursor - end;
     const points = session.points.slice(0, end + 1);
+    const current = session.points[end];
+    const next = session.points[Math.min(end + 1, session.points.length - 1)];
+    if (fraction > 0 && current && next) {
+      points.push({
+        time: current.time + (next.time - current.time) * fraction,
+        price: current.price + (next.price - current.price) * fraction,
+        volume: next.volume * fraction,
+      });
+    }
     const prices = points.map((point) => point.price);
     const close = prices.at(-1) ?? session.open;
     return {
@@ -463,8 +491,23 @@ export default function Home() {
   const replayPoint = activeSession.points.at(-1);
   const quotePrice = live ? data.quote.price : activeSession.close;
   const changeRate = live ? data.quote.changeRate : activeSession.change;
-  const buyPressure = Math.max(18, Math.min(82, 50 + changeRate * 5.4));
+  const replayBook = useMemo(() => Array.from({ length: 5 }, (_, index) => {
+    const pulse = .65 + Math.abs(Math.sin((replayPoint?.time ?? 0) / 470000 + index * 1.37));
+    const baseQuantity = Math.max(200, (replayPoint?.volume ?? 10000) / 7);
+    return {
+      ask: { price: quotePrice + (index + 1) * 1000, quantity: Math.round(baseQuantity * pulse * (1 - changeRate / 18)) },
+      bid: { price: quotePrice - (index + 1) * 1000, quantity: Math.round(baseQuantity * (1.8 - pulse / 2) * (1 + changeRate / 18)) },
+    };
+  }), [changeRate, quotePrice, replayPoint?.time, replayPoint?.volume]);
+  const bookLevels = live
+    ? Array.from({ length: 5 }, (_, index) => ({ ask: data.orderBook.asks[index], bid: data.orderBook.bids[index] })).filter((level) => level.ask && level.bid)
+    : replayBook;
+  const askTotal = bookLevels.reduce((sum, level) => sum + level.ask.quantity, 0);
+  const bidTotal = bookLevels.reduce((sum, level) => sum + level.bid.quantity, 0);
+  const buyPressure = live && askTotal + bidTotal > 0 ? Math.max(12, Math.min(88, bidTotal / (askTotal + bidTotal) * 100)) : Math.max(18, Math.min(82, 50 + changeRate * 5.4));
   const sellPressure = 100 - buyPressure;
+  const bookPressure = Math.max(-1, Math.min(1, (buyPressure - 50) / 34));
+  const maxBookQuantity = Math.max(1, ...bookLevels.flatMap((level) => [level.ask.quantity, level.bid.quantity]));
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
   const forceTier = activeSession.volume > 2800000 ? "총력전 · 공중전력 투입" : activeSession.volume > 1500000 ? "대규모 기계화 증원" : activeSession.volume > 600000 ? "장갑·보급 부대 투입" : "초기 보병 교전";
 
@@ -500,13 +543,13 @@ export default function Home() {
           }} aria-label={replayPlaying ? "리플레이 일시정지" : "리플레이 재생"}>{replayPlaying ? "Ⅱ" : "▶"}</button>
           <div className="replay-time"><small>INTRADAY REPLAY</small><strong>{replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }) : "09:00"}</strong></div>
           <span>09:00</span>
-          <input aria-label="장중 리플레이 시점" type="range" min="0" max={Math.max(0, session.points.length - 1)} value={Math.min(replayIndex, Math.max(0, session.points.length - 1))} onChange={(event) => { setReplayPlaying(false); setReplayIndex(Number(event.target.value)); }} />
+          <input aria-label="장중 리플레이 시점" type="range" min="0" max={Math.max(0, session.points.length - 1)} step="0.01" value={Math.min(replayIndex, Math.max(0, session.points.length - 1))} onChange={(event) => { setReplayPlaying(false); setReplayIndex(Number(event.target.value)); }} />
           <span>15:30</span>
-          <b>{replayIndex + 1} / {session.points.length}</b>
+          <b>{Math.floor(replayIndex) + 1} / {session.points.length}</b>
         </div>}
 
         <section className="battlefield" aria-label="SK하이닉스 시장 전장">
-          <MarketScene session={activeSession} live={live} />
+          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} />
           <div className="scene-grid" />
           <div className="scene-top-left"><b>KST {live ? now.toLocaleTimeString("ko-KR", { hour12: false }) : replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour12: false }) : "09:00:00"}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
           <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
@@ -517,9 +560,9 @@ export default function Home() {
 
           <div className="floating-panels">
             <article className="glass-panel order-depth" id="depth">
-              <div className="panel-heading"><div><small>ORDER BOOK DEPTH</small><strong>호가 잔량 분포</strong></div><span className="source-pill">KRX 통합</span></div>
-              <div className="depth-scale"><span>SELL</span><i /><span>BUY</span></div>
-              {[0.84, 0.63, 0.46, 0.72, 0.91].map((amount, index) => <div className="depth-row" key={index}><b>{won(quotePrice + (2 - index) * 1000)}</b><div><i className="sell-bar" style={{ width: `${amount * sellPressure}%` }} /><i className="buy-bar" style={{ width: `${amount * buyPressure}%` }} /></div><span>{compact(activeSession.volume * amount / 18)}</span></div>)}
+              <div className="panel-heading"><div><small>ORDER BOOK DEPTH</small><strong>5단계 호가 잔량</strong></div><span className="source-pill">{live ? "실제 호가 · 20분 지연" : "장중 추정"}</span></div>
+              <div className="depth-scale"><span>SELL {compact(askTotal)}</span><i /><span>BUY {compact(bidTotal)}</span></div>
+              {bookLevels.map((level, index) => <div className="depth-row" key={index}><b className="ask-price">{won(level.ask.price)}</b><div title={`매도 ${level.ask.quantity.toLocaleString()}주 · 매수 ${level.bid.quantity.toLocaleString()}주`}><i className="sell-bar" style={{ width: `${level.ask.quantity / maxBookQuantity * 50}%` }} /><i className="buy-bar" style={{ width: `${level.bid.quantity / maxBookQuantity * 50}%` }} /></div><span className="bid-price">{won(level.bid.price)}</span></div>)}
             </article>
 
             <article className="glass-panel market-feed" id="feed">

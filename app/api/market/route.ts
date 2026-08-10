@@ -4,13 +4,17 @@ const toNumber = (value: unknown) => Number(String(value ?? "0").replaceAll(",",
 
 export async function GET() {
   try {
-    const [naverResponse, yahooResponse] = await Promise.all([
+    const [naverResponse, yahooResponse, orderBookResponse] = await Promise.all([
       fetch("https://polling.finance.naver.com/api/realtime/domestic/stock/000660", {
         headers: { Referer: "https://finance.naver.com/", "User-Agent": "Mozilla/5.0" },
         cache: "no-store",
       }),
       fetch("https://query1.finance.yahoo.com/v8/finance/chart/000660.KS?range=10d&interval=5m", {
         headers: { "User-Agent": "Mozilla/5.0" },
+        cache: "no-store",
+      }),
+      fetch("https://finance.naver.com/item/sise.naver?code=000660&asktype=5", {
+        headers: { Referer: "https://finance.naver.com/", "User-Agent": "Mozilla/5.0" },
         cache: "no-store",
       }),
     ]);
@@ -20,6 +24,13 @@ export async function GET() {
     const yahoo = await yahooResponse.json();
     const stock = naver?.datas?.[0];
     const result = yahoo?.chart?.result?.[0];
+    const orderBookHtml = orderBookResponse.ok ? await orderBookResponse.text() : "";
+    const extractCells = (className: string) => Array.from(orderBookHtml.matchAll(new RegExp(`<td class="num ${className}">[\\s\\S]*?<span[^>]*>([\\s\\S]*?)<\\/span>`, "g")))
+      .map((match) => toNumber(match[1].replace(/<[^>]+>/g, "").trim()));
+    const askCells = extractCells("bg01");
+    const bidCells = extractCells("bg02");
+    const asks = Array.from({ length: Math.floor(askCells.length / 2) }, (_, index) => ({ quantity: askCells[index * 2], price: askCells[index * 2 + 1] })).filter((item) => item.price && item.quantity).reverse();
+    const bids = Array.from({ length: Math.floor(bidCells.length / 2) }, (_, index) => ({ price: bidCells[index * 2], quantity: bidCells[index * 2 + 1] })).filter((item) => item.price && item.quantity);
     const timestamps: number[] = result?.timestamp ?? [];
     const quote = result?.indicators?.quote?.[0] ?? {};
     const grouped = new Map<string, Array<{ time: number; price: number; volume: number }>>();
@@ -64,6 +75,7 @@ export async function GET() {
         marketStatus: stock?.marketStatus ?? "UNKNOWN",
       },
       sessions,
+      orderBook: { asks: asks.slice(0, 5), bids: bids.slice(0, 5), delayed: true },
       source: "NAVER · YAHOO FINANCE",
     }, { headers: { "Cache-Control": "no-store, max-age=0" } });
   } catch (error) {
