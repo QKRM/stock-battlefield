@@ -618,6 +618,7 @@ export default function Home() {
   const [selected, setSelected] = useState("LIVE");
   const [now, setNow] = useState(new Date());
   const [connected, setConnected] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(new Date());
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
 
@@ -629,6 +630,7 @@ export default function Home() {
       if (next.sessions?.length) {
         setData({ ...next, orderBook: next.orderBook?.asks?.length && next.orderBook?.bids?.length ? next.orderBook : fallbackData.orderBook });
         setConnected(true);
+        setLastUpdated(new Date());
       }
     } catch {
       setConnected(false);
@@ -637,7 +639,7 @@ export default function Home() {
 
   useEffect(() => {
     loadData();
-    const quoteTimer = window.setInterval(loadData, 30000);
+    const quoteTimer = window.setInterval(loadData, 10000);
     const clockTimer = window.setInterval(() => setNow(new Date()), 1000);
     return () => {
       window.clearInterval(quoteTimer);
@@ -722,6 +724,7 @@ export default function Home() {
   const maxBookQuantity = Math.max(1, ...bookLevels.flatMap((level) => [level.ask.quantity, level.bid.quantity]));
   const bestAsk = bookLevels[0]?.ask.price ?? quotePrice + 1000;
   const bestBid = bookLevels[0]?.bid.price ?? quotePrice - 1000;
+  const refreshIn = Math.max(0, 10 - Math.floor((now.getTime() - lastUpdated.getTime()) / 1000));
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
   const forceTier = activeSession.volume > 2800000 ? "총력전 · 공중전력 투입" : activeSession.volume > 1500000 ? "대규모 기계화 증원" : activeSession.volume > 600000 ? "장갑·보급 부대 투입" : "초기 보병 교전";
 
@@ -730,14 +733,14 @@ export default function Home() {
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><i /><i /></span><strong>stockhedge</strong><em>KOREA DATA</em></div>
         <div className="only-view"><span /> SK하이닉스 BATTLEFIELD</div>
-        <div className="connection"><i className={connected ? "online" : ""} /> {connected ? "MARKET DATA CONNECTED" : "CONNECTING"}<b>KOSPI · 000660</b></div>
+        <div className="connection"><i className={connected ? "online" : ""} /> {connected ? "10 SEC LIVE FEED" : "CONNECTING"}<b>KOSPI · 000660 · {refreshIn}s</b></div>
       </header>
 
       <aside className="sidebar">
         <p className="side-title">CURRENT VIEW</p>
         <div className="side-link selected"><span>◩</span><div><b>Hynix Battlefield</b><small>실시간 매수·매도 전선</small></div></div>
         <div className="side-explain"><span>RED</span><p>매도 세력 · 전진 시 주가 압박</p><span>GREEN</span><p>매수 세력 · 전진 시 주가 상승 압력</p><span>WHITE LINE</span><p>두 세력이 충돌하는 현재 가격 전선</p></div>
-        <div className="side-footer"><span>DATA FEED</span><b>{connected ? "CONNECTED" : "FALLBACK"}</b><small>30초마다 갱신</small></div>
+        <div className="side-footer"><span>DATA FEED</span><b>{connected ? "CONNECTED" : "FALLBACK"}</b><small>10초마다 시세 갱신 · 전투는 실시간 렌더링</small></div>
       </aside>
 
       <main className="content" id="battlefield">
