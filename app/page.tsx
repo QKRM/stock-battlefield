@@ -134,6 +134,48 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
         polygon([{x:base.x-s,y:base.y-h},{x:base.x,y:base.y-h+s*.42},{x:base.x,y:base.y+s*.42},{x:base.x-s,y:base.y}],palette[1]);
         polygon([{x:base.x+s,y:base.y-h},{x:base.x,y:base.y-h+s*.42},{x:base.x,y:base.y+s*.42},{x:base.x+s,y:base.y}],palette[0]);
       };
+      const tank = (x: number, z: number, color: "red" | "green", bounce: number) => {
+        const base = project(x, z);
+        const direction = color === "red" ? 1 : -1;
+        const s = (9.5 + z * 5) * base.scale;
+        const lift = bounce * base.scale;
+        const bright = color === "green" ? "#55e89a" : "#ee5967";
+        const body = color === "green" ? "#216b45" : "#792d36";
+        const dark = color === "green" ? "#102f21" : "#38171c";
+        context.save();
+        context.fillStyle = "rgba(0,0,0,.48)";
+        context.beginPath(); context.ellipse(base.x, base.y + s * .36, s * 1.28, s * .35, 0, 0, Math.PI * 2); context.fill();
+        polygon([{x:base.x-s*1.18,y:base.y+s*.16-lift},{x:base.x-s*.78,y:base.y-s*.5-lift},{x:base.x+s*.95,y:base.y-s*.36-lift},{x:base.x+s*1.24,y:base.y+s*.2-lift}],dark,`${bright}77`);
+        polygon([{x:base.x-s*.82,y:base.y-s*.45-lift},{x:base.x-s*.35,y:base.y-s*.78-lift},{x:base.x+s*.72,y:base.y-s*.64-lift},{x:base.x+s*.98,y:base.y-s*.33-lift}],body);
+        context.fillStyle = bright;
+        context.beginPath(); context.ellipse(base.x+direction*s*.05,base.y-s*.72-lift,s*.42,s*.26,-.06,0,Math.PI*2); context.fill();
+        context.strokeStyle = bright; context.lineWidth = Math.max(1, s*.14); context.lineCap = "round";
+        context.beginPath(); context.moveTo(base.x+direction*s*.22,base.y-s*.75-lift); context.lineTo(base.x+direction*s*1.72,base.y-s*.93-lift); context.stroke();
+        context.strokeStyle = "rgba(8,12,10,.9)"; context.lineWidth = Math.max(1,s*.12);
+        for(let tread=-.76;tread<=.8;tread+=.33){context.beginPath();context.moveTo(base.x+tread*s,base.y-s*.26-lift);context.lineTo(base.x+(tread+.11)*s,base.y+s*.1-lift);context.stroke();}
+        context.restore();
+      };
+      const soldier = (x: number, z: number, color: "red" | "green", stride: number) => {
+        const base = project(x, z);
+        const direction = color === "red" ? 1 : -1;
+        const s = (4.2 + z * 3.6) * base.scale;
+        const bright = color === "green" ? "#72f2aa" : "#ff727e";
+        const armor = color === "green" ? "#174f34" : "#60242c";
+        context.save();
+        context.translate(base.x, base.y);
+        context.lineCap = "round";
+        context.strokeStyle = "rgba(0,0,0,.75)"; context.lineWidth = Math.max(1,s*.52);
+        context.beginPath(); context.moveTo(0,-s*1.5); context.lineTo(0,-s*.45); context.stroke();
+        context.strokeStyle = bright; context.lineWidth = Math.max(1,s*.24);
+        context.beginPath(); context.moveTo(0,-s*.65); context.lineTo(-s*.42,-s*.05+stride); context.moveTo(0,-s*.65); context.lineTo(s*.42,-s*.05-stride); context.stroke();
+        context.strokeStyle = armor; context.lineWidth = Math.max(1,s*.34);
+        context.beginPath(); context.moveTo(0,-s*1.15); context.lineTo(direction*s*.58,-s*.68); context.stroke();
+        context.strokeStyle = bright; context.lineWidth = Math.max(1,s*.16);
+        context.beginPath(); context.moveTo(direction*s*.12,-s*1.05); context.lineTo(direction*s*1.18,-s*.87); context.stroke();
+        context.fillStyle = bright; context.beginPath(); context.arc(0,-s*1.75,s*.34,0,Math.PI*2); context.fill();
+        context.fillStyle = armor; context.beginPath(); context.arc(direction*s*.06,-s*1.86,s*.3,Math.PI,Math.PI*2); context.fill();
+        context.restore();
+      };
       context.save();
       context.beginPath();
       context.moveTo(0, horizon);
@@ -196,7 +238,7 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
         block(front + .085 + clash, z, scale, 20 + ((row * 11) % 20), "green", .9);
       }
 
-      // Two armies continuously charge, fall back and regroup.
+      // Tanks and infantry continuously charge, fall back and regroup.
       for (let row = 0; row < 8; row += 1) {
         const z = .16 + row * .105;
         const front = frontAt(z);
@@ -206,9 +248,14 @@ function MarketScene({ session, live }: { session: Session; live: boolean }) {
           const greenHome = .92 - unit * .105;
           const redAdvance = Math.min(front - .15, redHome + depthPhase * .34 * (1 - pressure * .45));
           const greenAdvance = Math.max(front + .15, greenHome - depthPhase * .34 * (1 + pressure * .45));
-          const bob = Math.abs(Math.sin(time * 5 + unit + row)) * .012;
-          block(redAdvance, z + (unit % 2) * .025, 5.8 + z * 3.4, 7 + bob * 70, "red", .68);
-          block(greenAdvance, z + ((unit + 1) % 2) * .025, 5.8 + z * 3.4, 7 + bob * 70, "green", .7);
+          const bob = Math.abs(Math.sin(time * 5 + unit + row));
+          if (unit % 3 === 0) {
+            tank(redAdvance, z + .012, "red", bob * 1.3);
+            tank(greenAdvance, z + .026, "green", bob * 1.3);
+          } else {
+            soldier(redAdvance, z + (unit % 2) * .025, "red", Math.sin(time * 7 + unit) * 1.2);
+            soldier(greenAdvance, z + ((unit + 1) % 2) * .025, "green", Math.sin(time * 7 + unit + 2) * 1.2);
+          }
         }
       }
 
@@ -248,6 +295,8 @@ export default function Home() {
   const [selected, setSelected] = useState("LIVE");
   const [now, setNow] = useState(new Date());
   const [connected, setConnected] = useState(false);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [replayPlaying, setReplayPlaying] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -273,14 +322,53 @@ export default function Home() {
     };
   }, [loadData]);
 
-  const sessions = data.sessions.slice(-7);
+  const sessions = useMemo(() => data.sessions.slice(-7), [data.sessions]);
   const session = useMemo(() => {
     if (selected === "LIVE") return sessions.at(-1) ?? fallbackSessions.at(-1)!;
     return sessions.find((item) => item.date === selected) ?? sessions.at(-1) ?? fallbackSessions.at(-1)!;
   }, [selected, sessions]);
   const live = selected === "LIVE";
-  const quotePrice = live ? data.quote.price : session.close;
-  const changeRate = live ? data.quote.changeRate : session.change;
+  useEffect(() => {
+    if (!live) {
+      setReplayIndex(Math.max(0, session.points.length - 1));
+      setReplayPlaying(false);
+    }
+  }, [live, selected, session.points.length]);
+
+  useEffect(() => {
+    if (live || !replayPlaying) return;
+    const timer = window.setInterval(() => {
+      setReplayIndex((current) => {
+        if (current >= session.points.length - 1) {
+          setReplayPlaying(false);
+          return current;
+        }
+        return current + 1;
+      });
+    }, 220);
+    return () => window.clearInterval(timer);
+  }, [live, replayPlaying, session.points.length]);
+
+  const replaySession = useMemo(() => {
+    if (live || !session.points.length) return session;
+    const end = Math.min(replayIndex, session.points.length - 1);
+    const points = session.points.slice(0, end + 1);
+    const prices = points.map((point) => point.price);
+    const close = prices.at(-1) ?? session.open;
+    return {
+      ...session,
+      high: Math.max(...prices),
+      low: Math.min(...prices),
+      close,
+      change: session.open ? ((close - session.open) / session.open) * 100 : 0,
+      volume: points.reduce((sum, point) => sum + point.volume, 0),
+      points,
+    };
+  }, [live, replayIndex, session]);
+  const activeSession = live ? session : replaySession;
+  const replayPoint = activeSession.points.at(-1);
+  const quotePrice = live ? data.quote.price : activeSession.close;
+  const changeRate = live ? data.quote.changeRate : activeSession.change;
   const buyPressure = Math.max(18, Math.min(82, 50 + changeRate * 5.4));
   const sellPressure = 100 - buyPressure;
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
@@ -310,11 +398,23 @@ export default function Home() {
           {sessions.map((item) => <button key={item.date} className={selected === item.date ? "selected" : ""} onClick={() => setSelected(item.date)}>{formatDate(item.date)}<small>{item.change >= 0 ? "+" : ""}{item.change.toFixed(2)}%</small></button>)}
         </div>
 
+        {!live && <div className="replay-control">
+          <button className={replayPlaying ? "playing" : ""} onClick={() => {
+            if (replayIndex >= session.points.length - 1) setReplayIndex(0);
+            setReplayPlaying((value) => !value);
+          }} aria-label={replayPlaying ? "리플레이 일시정지" : "리플레이 재생"}>{replayPlaying ? "Ⅱ" : "▶"}</button>
+          <div className="replay-time"><small>INTRADAY REPLAY</small><strong>{replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }) : "09:00"}</strong></div>
+          <span>09:00</span>
+          <input aria-label="장중 리플레이 시점" type="range" min="0" max={Math.max(0, session.points.length - 1)} value={Math.min(replayIndex, Math.max(0, session.points.length - 1))} onChange={(event) => { setReplayPlaying(false); setReplayIndex(Number(event.target.value)); }} />
+          <span>15:30</span>
+          <b>{replayIndex + 1} / {session.points.length}</b>
+        </div>}
+
         <section className="battlefield" aria-label="SK하이닉스 시장 전장">
-          <MarketScene session={session} live={live} />
+          <MarketScene session={activeSession} live={live} />
           <div className="scene-grid" />
-          <div className="scene-top-left"><b>KST {now.toLocaleTimeString("ko-KR", { hour12: false })}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
-          <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "CLOSE"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
+          <div className="scene-top-left"><b>KST {live ? now.toLocaleTimeString("ko-KR", { hour12: false }) : replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour12: false }) : "09:00:00"}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
+          <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
           <div className="scene-pressure"><small>MARKET PRESSURE</small><strong>{pressureLabel}</strong><span>{changeRate >= 0 ? "매수세가 전선을 밀어 올리고 있습니다" : "매도세가 전선을 압박하고 있습니다"}</span></div>
           <div className="wall-label sell"><small>SELL WALL</small><strong>{sellPressure.toFixed(1)}%</strong><span>매도 압력</span></div>
           <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>
@@ -324,14 +424,14 @@ export default function Home() {
             <article className="glass-panel order-depth" id="depth">
               <div className="panel-heading"><div><small>ORDER BOOK DEPTH</small><strong>호가 잔량 분포</strong></div><span className="source-pill">KRX 통합</span></div>
               <div className="depth-scale"><span>SELL</span><i /><span>BUY</span></div>
-              {[0.84, 0.63, 0.46, 0.72, 0.91].map((amount, index) => <div className="depth-row" key={index}><b>{won(quotePrice + (2 - index) * 1000)}</b><div><i className="sell-bar" style={{ width: `${amount * sellPressure}%` }} /><i className="buy-bar" style={{ width: `${amount * buyPressure}%` }} /></div><span>{compact(session.volume * amount / 18)}</span></div>)}
+              {[0.84, 0.63, 0.46, 0.72, 0.91].map((amount, index) => <div className="depth-row" key={index}><b>{won(quotePrice + (2 - index) * 1000)}</b><div><i className="sell-bar" style={{ width: `${amount * sellPressure}%` }} /><i className="buy-bar" style={{ width: `${amount * buyPressure}%` }} /></div><span>{compact(activeSession.volume * amount / 18)}</span></div>)}
             </article>
 
             <article className="glass-panel market-feed" id="feed">
               <div className="panel-heading"><div><small>MARKET FEED</small><strong>시장 체결 흐름</strong></div><span className="feed-live"><i /> {live ? "LIVE" : session.date}</span></div>
               <div className="feed-list">
-                {session.points.slice(-5).reverse().map((point, index) => {
-                  const previous = session.points[Math.max(0, session.points.length - 2 - index)]?.price ?? point.price;
+                {activeSession.points.slice(-5).reverse().map((point, index) => {
+                  const previous = activeSession.points[Math.max(0, activeSession.points.length - 2 - index)]?.price ?? point.price;
                   const isUp = point.price >= previous;
                   return <div className="feed-row" key={`${point.time}-${index}`}><time>{new Date(point.time).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })}</time><span className={isUp ? "trade-dot buy-dot" : "trade-dot sell-dot"} /> <b>{isUp ? "매수 체결" : "매도 체결"}</b><strong>{won(point.price)}</strong><em>{compact(point.volume)}주</em></div>;
                 })}
@@ -342,9 +442,9 @@ export default function Home() {
 
         <section className="stat-strip">
           <div><small>시가</small><strong>{won(live ? data.quote.open : session.open)}</strong></div>
-          <div><small>고가</small><strong className="up">{won(live ? data.quote.high : session.high)}</strong></div>
-          <div><small>저가</small><strong className="down">{won(live ? data.quote.low : session.low)}</strong></div>
-          <div><small>거래량</small><strong>{compact(live ? data.quote.volume : session.volume)}주</strong></div>
+          <div><small>고가</small><strong className="up">{won(live ? data.quote.high : activeSession.high)}</strong></div>
+          <div><small>저가</small><strong className="down">{won(live ? data.quote.low : activeSession.low)}</strong></div>
+          <div><small>거래량</small><strong>{compact(live ? data.quote.volume : activeSession.volume)}주</strong></div>
           <div><small>데이터 소스</small><strong>{connected ? data.source : "연결 대기 중"}</strong></div>
         </section>
         <p className="disclaimer">본 화면은 정보 제공용 시각화이며 투자 권유가 아닙니다. 실시간 시세는 제공처 사정에 따라 지연될 수 있습니다.</p>
