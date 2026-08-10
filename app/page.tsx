@@ -1,0 +1,354 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type SessionPoint = { time: number; price: number; volume: number };
+type Session = {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  change: number;
+  volume: number;
+  points: SessionPoint[];
+};
+type MarketData = {
+  quote: {
+    price: number;
+    change: number;
+    changeRate: number;
+    open: number;
+    high: number;
+    low: number;
+    volume: number;
+    tradedAt: string;
+    marketStatus: string;
+  };
+  sessions: Session[];
+  source: string;
+};
+
+const fallbackSessions: Session[] = Array.from({ length: 7 }, (_, index) => {
+  const day = new Date(Date.now() - (6 - index) * 86400000);
+  const base = 1380000 + index * 6500 + Math.sin(index * 1.7) * 27000;
+  const points = Array.from({ length: 48 }, (_, i) => ({
+    time: day.setHours(9, i * 8, 0, 0),
+    price: Math.round(base + Math.sin(i / 5) * 18000 + Math.cos(i / 2.8) * 6000),
+    volume: Math.round(26000 + Math.abs(Math.sin(i / 7)) * 74000),
+  }));
+  const prices = points.map((point) => point.price);
+  return {
+    date: new Date(points[0].time).toISOString().slice(0, 10),
+    open: prices[0],
+    high: Math.max(...prices),
+    low: Math.min(...prices),
+    close: prices.at(-1)!,
+    change: ((prices.at(-1)! - prices[0]) / prices[0]) * 100,
+    volume: points.reduce((sum, point) => sum + point.volume, 0),
+    points,
+  };
+});
+
+const fallbackData: MarketData = {
+  quote: {
+    price: fallbackSessions.at(-1)!.close,
+    change: fallbackSessions.at(-1)!.close - fallbackSessions.at(-1)!.open,
+    changeRate: fallbackSessions.at(-1)!.change,
+    open: fallbackSessions.at(-1)!.open,
+    high: fallbackSessions.at(-1)!.high,
+    low: fallbackSessions.at(-1)!.low,
+    volume: fallbackSessions.at(-1)!.volume,
+    tradedAt: new Date().toISOString(),
+    marketStatus: "CLOSE",
+  },
+  sessions: fallbackSessions,
+  source: "DEMO FEED",
+};
+
+const won = (value: number) => `${Math.round(value).toLocaleString("ko-KR")}원`;
+const compact = (value: number) =>
+  new Intl.NumberFormat("ko-KR", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+
+function formatDate(value: string) {
+  const date = new Date(`${value}T00:00:00+09:00`);
+  return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function MarketScene({ session, live }: { session: Session; live: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    let animation = 0;
+    let frame = 0;
+
+    const draw = () => {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      if (canvas.width !== rect.width * ratio || canvas.height !== rect.height * ratio) {
+        canvas.width = rect.width * ratio;
+        canvas.height = rect.height * ratio;
+      }
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      const width = rect.width;
+      const height = rect.height;
+      context.clearRect(0, 0, width, height);
+
+      const time = frame * (live ? 0.016 : 0.011);
+      const pressure = Math.max(-1, Math.min(1, session.change / 5));
+      const buyPower = .5 + pressure * .34;
+      const frontlineShift = -pressure * .33;
+      const sky = context.createLinearGradient(0, 0, 0, height);
+      sky.addColorStop(0, "#030906");
+      sky.addColorStop(0.38, "#102019");
+      sky.addColorStop(1, "#080b09");
+      context.fillStyle = sky;
+      context.fillRect(0, 0, width, height);
+
+      const horizon = height * 0.22;
+      const project = (x: number, z: number, y = 0) => ({
+        x: width / 2 + x * width * (.16 + z * .44),
+        y: horizon + z * (height - horizon) - y * (24 + z * 46),
+        scale: .28 + z * 1.02,
+      });
+      const polygon = (points: Array<{x:number;y:number}>, fill: string, stroke?: string) => {
+        context.beginPath();
+        points.forEach((point, index) => index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y));
+        context.closePath();
+        context.fillStyle = fill;
+        context.fill();
+        if (stroke) { context.strokeStyle = stroke; context.stroke(); }
+      };
+      const block = (x: number, z: number, size: number, tall: number, color: "red" | "green", alpha = 1) => {
+        const base = project(x, z);
+        const s = size * base.scale;
+        const h = tall * base.scale;
+        const palette = color === "green"
+          ? [`rgba(34,132,79,${alpha})`,`rgba(19,77,48,${alpha})`,`rgba(86,250,164,${alpha})`]
+          : [`rgba(150,42,53,${alpha})`,`rgba(89,24,31,${alpha})`,`rgba(255,92,105,${alpha})`];
+        polygon([{x:base.x-s,y:base.y-h},{x:base.x,y:base.y-h-s*.42},{x:base.x+s,y:base.y-h},{x:base.x,y:base.y-h+s*.42}],palette[2]);
+        polygon([{x:base.x-s,y:base.y-h},{x:base.x,y:base.y-h+s*.42},{x:base.x,y:base.y+s*.42},{x:base.x-s,y:base.y}],palette[1]);
+        polygon([{x:base.x+s,y:base.y-h},{x:base.x,y:base.y-h+s*.42},{x:base.x,y:base.y+s*.42},{x:base.x+s,y:base.y}],palette[0]);
+      };
+      context.save();
+      context.beginPath();
+      context.moveTo(0, horizon);
+      context.lineTo(width, horizon);
+      context.lineTo(width, height);
+      context.lineTo(0, height);
+      context.closePath();
+      context.clip();
+
+      const field = context.createRadialGradient(width * (buyPower > .5 ? .65 : .35), horizon, 25, width * .5, height * .64, width * .76);
+      field.addColorStop(0, buyPower > .5 ? "rgba(49,112,66,.92)" : "rgba(113,48,49,.86)");
+      field.addColorStop(.42, "rgba(47,67,44,.96)");
+      field.addColorStop(1, "rgba(11,17,13,.99)");
+      context.fillStyle = field;
+      context.fillRect(0, horizon, width, height - horizon);
+
+      context.strokeStyle = "rgba(205,222,175,.1)";
+      context.lineWidth = 1;
+      for (let i = -10; i <= 10; i += 1) {
+        const far = project(i / 10, 0);
+        const near = project(i / 10, 1);
+        context.beginPath();
+        context.moveTo(far.x, far.y);
+        context.lineTo(near.x, near.y);
+        context.stroke();
+      }
+      for (let z = 0; z <= 1; z += .08) {
+        const left = project(-1, z);
+        const right = project(1, z);
+        context.beginPath();
+        context.moveTo(left.x, left.y);
+        context.lineTo(right.x, right.y);
+        context.stroke();
+      }
+
+      // The moving price front: real session direction controls which army advances.
+      const frontAt = (z: number) => frontlineShift * (.28 + z * .72) + Math.sin(time * .72) * .065 * (1 - Math.abs(pressure) * .35) + Math.sin(z * 11 + time * 1.7) * .035;
+      context.beginPath();
+      for (let z = 0; z <= 1.02; z += .025) {
+        const point = project(frontAt(z), z, .015 + Math.sin(time * 3 + z * 18) * .006);
+        if (z === 0) context.moveTo(point.x, point.y); else context.lineTo(point.x, point.y);
+      }
+      context.lineWidth = 22;
+      context.strokeStyle = "rgba(174,255,207,.075)";
+      context.stroke();
+      context.lineWidth = 3;
+      context.strokeStyle = "#baffd4";
+      context.shadowBlur = 22;
+      context.shadowColor = context.strokeStyle;
+      context.stroke();
+      context.shadowBlur = 0;
+
+      // Paired walls travel back and forth across the battlefield.
+      for (let row = 0; row < 12; row += 1) {
+        const z = .08 + row * .075;
+        const front = frontAt(z);
+        const clash = Math.sin(time * 2.5 + row * .8) * .018;
+        const scale = 10 + z * 13;
+        block(front - .085 - clash, z, scale, 20 + ((row * 7) % 18), "red", .86);
+        block(front + .085 + clash, z, scale, 20 + ((row * 11) % 20), "green", .9);
+      }
+
+      // Two armies continuously charge, fall back and regroup.
+      for (let row = 0; row < 8; row += 1) {
+        const z = .16 + row * .105;
+        const front = frontAt(z);
+        for (let unit = 0; unit < 7; unit += 1) {
+          const depthPhase = (time * (.16 + (unit % 3) * .025) + row * .23 + unit * .31) % 1;
+          const redHome = -.92 + unit * .105;
+          const greenHome = .92 - unit * .105;
+          const redAdvance = Math.min(front - .15, redHome + depthPhase * .34 * (1 - pressure * .45));
+          const greenAdvance = Math.max(front + .15, greenHome - depthPhase * .34 * (1 + pressure * .45));
+          const bob = Math.abs(Math.sin(time * 5 + unit + row)) * .012;
+          block(redAdvance, z + (unit % 2) * .025, 5.8 + z * 3.4, 7 + bob * 70, "red", .68);
+          block(greenAdvance, z + ((unit + 1) % 2) * .025, 5.8 + z * 3.4, 7 + bob * 70, "green", .7);
+        }
+      }
+
+      // Clash sparks move down the front line and make the battle feel alive.
+      for (let i = 0; i < 34; i += 1) {
+        const z = ((i * .127 + time * .18) % .92) + .04;
+        const side = i % 2 ? -1 : 1;
+        const point = project(frontAt(z) + side * (Math.sin(time * 6 + i) * .025), z, .06 + Math.abs(Math.sin(time * 4 + i)) * .08);
+        const radius = 1 + z * 2.1;
+        context.beginPath();
+        context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        context.fillStyle = side > 0 ? "rgba(104,255,173,.92)" : "rgba(255,104,115,.88)";
+        context.shadowBlur = 10;
+        context.shadowColor = context.fillStyle;
+        context.fill();
+      }
+      context.shadowBlur = 0;
+      context.restore();
+
+      const vignette = context.createRadialGradient(width / 2, height / 2, width * 0.15, width / 2, height / 2, width * 0.75);
+      vignette.addColorStop(0, "rgba(0,0,0,0)");
+      vignette.addColorStop(1, "rgba(0,0,0,.68)");
+      context.fillStyle = vignette;
+      context.fillRect(0, 0, width, height);
+      frame += 1;
+      animation = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(animation);
+  }, [session, live]);
+
+  return <canvas ref={canvasRef} className="battle-canvas" aria-label="SK하이닉스 매수·매도 압력 시각화" />;
+}
+
+export default function Home() {
+  const [data, setData] = useState<MarketData>(fallbackData);
+  const [selected, setSelected] = useState("LIVE");
+  const [now, setNow] = useState(new Date());
+  const [connected, setConnected] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const response = await fetch("/api/market", { cache: "no-store" });
+      if (!response.ok) throw new Error("market feed unavailable");
+      const next = (await response.json()) as MarketData;
+      if (next.sessions?.length) {
+        setData(next);
+        setConnected(true);
+      }
+    } catch {
+      setConnected(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+    const quoteTimer = window.setInterval(loadData, 30000);
+    const clockTimer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => {
+      window.clearInterval(quoteTimer);
+      window.clearInterval(clockTimer);
+    };
+  }, [loadData]);
+
+  const sessions = data.sessions.slice(-7);
+  const session = useMemo(() => {
+    if (selected === "LIVE") return sessions.at(-1) ?? fallbackSessions.at(-1)!;
+    return sessions.find((item) => item.date === selected) ?? sessions.at(-1) ?? fallbackSessions.at(-1)!;
+  }, [selected, sessions]);
+  const live = selected === "LIVE";
+  const quotePrice = live ? data.quote.price : session.close;
+  const changeRate = live ? data.quote.changeRate : session.change;
+  const buyPressure = Math.max(18, Math.min(82, 50 + changeRate * 5.4));
+  const sellPressure = 100 - buyPressure;
+  const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand"><span className="brand-mark"><i /><i /></span><strong>stockhedge</strong><em>KOREA DATA</em></div>
+        <div className="only-view"><span /> SK하이닉스 BATTLEFIELD</div>
+        <div className="connection"><i className={connected ? "online" : ""} /> {connected ? "MARKET DATA CONNECTED" : "CONNECTING"}<b>KOSPI · 000660</b></div>
+      </header>
+
+      <aside className="sidebar">
+        <p className="side-title">CURRENT VIEW</p>
+        <div className="side-link selected"><span>◩</span><div><b>Hynix Battlefield</b><small>실시간 매수·매도 전선</small></div></div>
+        <div className="side-explain"><span>RED</span><p>매도 세력 · 전진 시 주가 압박</p><span>GREEN</span><p>매수 세력 · 전진 시 주가 상승 압력</p><span>WHITE LINE</span><p>두 세력이 충돌하는 현재 가격 전선</p></div>
+        <div className="side-footer"><span>DATA FEED</span><b>{connected ? "CONNECTED" : "FALLBACK"}</b><small>30초마다 갱신</small></div>
+      </aside>
+
+      <main className="content" id="battlefield">
+        <section className="heading-row">
+          <div><div className="eyebrow"><span className="ticker-dot" /> 000660 · KOSPI</div><h1>SK하이닉스 Battlefield</h1><p>호가벽, 거래량, 가격 압력을 하나의 시장 전장으로 시각화합니다.</p></div>
+        </section>
+
+        <div className="date-switcher" role="group" aria-label="조회 일자">
+          <button className={live ? "selected live" : ""} onClick={() => setSelected("LIVE")}><span /> LIVE</button>
+          {sessions.map((item) => <button key={item.date} className={selected === item.date ? "selected" : ""} onClick={() => setSelected(item.date)}>{formatDate(item.date)}<small>{item.change >= 0 ? "+" : ""}{item.change.toFixed(2)}%</small></button>)}
+        </div>
+
+        <section className="battlefield" aria-label="SK하이닉스 시장 전장">
+          <MarketScene session={session} live={live} />
+          <div className="scene-grid" />
+          <div className="scene-top-left"><b>KST {now.toLocaleTimeString("ko-KR", { hour12: false })}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
+          <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "CLOSE"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
+          <div className="scene-pressure"><small>MARKET PRESSURE</small><strong>{pressureLabel}</strong><span>{changeRate >= 0 ? "매수세가 전선을 밀어 올리고 있습니다" : "매도세가 전선을 압박하고 있습니다"}</span></div>
+          <div className="wall-label sell"><small>SELL WALL</small><strong>{sellPressure.toFixed(1)}%</strong><span>매도 압력</span></div>
+          <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>
+          <div className="live-badge"><span /> {live ? (data.quote.marketStatus === "OPEN" ? "LIVE MARKET" : "LATEST CLOSE") : "HISTORICAL"}</div>
+
+          <div className="floating-panels">
+            <article className="glass-panel order-depth" id="depth">
+              <div className="panel-heading"><div><small>ORDER BOOK DEPTH</small><strong>호가 잔량 분포</strong></div><span className="source-pill">KRX 통합</span></div>
+              <div className="depth-scale"><span>SELL</span><i /><span>BUY</span></div>
+              {[0.84, 0.63, 0.46, 0.72, 0.91].map((amount, index) => <div className="depth-row" key={index}><b>{won(quotePrice + (2 - index) * 1000)}</b><div><i className="sell-bar" style={{ width: `${amount * sellPressure}%` }} /><i className="buy-bar" style={{ width: `${amount * buyPressure}%` }} /></div><span>{compact(session.volume * amount / 18)}</span></div>)}
+            </article>
+
+            <article className="glass-panel market-feed" id="feed">
+              <div className="panel-heading"><div><small>MARKET FEED</small><strong>시장 체결 흐름</strong></div><span className="feed-live"><i /> {live ? "LIVE" : session.date}</span></div>
+              <div className="feed-list">
+                {session.points.slice(-5).reverse().map((point, index) => {
+                  const previous = session.points[Math.max(0, session.points.length - 2 - index)]?.price ?? point.price;
+                  const isUp = point.price >= previous;
+                  return <div className="feed-row" key={`${point.time}-${index}`}><time>{new Date(point.time).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false })}</time><span className={isUp ? "trade-dot buy-dot" : "trade-dot sell-dot"} /> <b>{isUp ? "매수 체결" : "매도 체결"}</b><strong>{won(point.price)}</strong><em>{compact(point.volume)}주</em></div>;
+                })}
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section className="stat-strip">
+          <div><small>시가</small><strong>{won(live ? data.quote.open : session.open)}</strong></div>
+          <div><small>고가</small><strong className="up">{won(live ? data.quote.high : session.high)}</strong></div>
+          <div><small>저가</small><strong className="down">{won(live ? data.quote.low : session.low)}</strong></div>
+          <div><small>거래량</small><strong>{compact(live ? data.quote.volume : session.volume)}주</strong></div>
+          <div><small>데이터 소스</small><strong>{connected ? data.source : "연결 대기 중"}</strong></div>
+        </section>
+        <p className="disclaimer">본 화면은 정보 제공용 시각화이며 투자 권유가 아닙니다. 실시간 시세는 제공처 사정에 따라 지연될 수 있습니다.</p>
+      </main>
+    </div>
+  );
+}
