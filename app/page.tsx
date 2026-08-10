@@ -775,8 +775,9 @@ export default function Home() {
           <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>
           <div className="front-quote-strip"><span className="ask">매도 1호가 <b>{won(bestAsk)}</b></span><strong>현재 전선 <em>{won(quotePrice)}</em></strong><span className="bid">매수 1호가 <b>{won(bestBid)}</b></span></div>
           <div className="live-badge"><span /> {live ? (data.quote.marketStatus === "OPEN" ? "LIVE MARKET" : "LATEST CLOSE") : "HISTORICAL"}</div>
+        </section>
 
-          <div className="floating-panels">
+          <section className="floating-panels" aria-label="호가 및 체결 정보">
             <article className="glass-panel order-depth" id="depth">
               <div className="panel-heading"><div><small>ORDER BOOK DEPTH</small><strong>5단계 호가 잔량</strong></div><span className="source-pill">{live ? "실제 호가 · 20분 지연" : "장중 추정"}</span></div>
               <div className="depth-scale"><span>SELL {compact(askTotal)}</span><i /><span>BUY {compact(bidTotal)}</span></div>
@@ -793,8 +794,7 @@ export default function Home() {
                 })}
               </div>
             </article>
-          </div>
-        </section>
+          </section>
 
         <section className="stat-strip">
           <div><small>시가</small><strong>{won(live ? data.quote.open : session.open)}</strong></div>
