@@ -449,14 +449,14 @@ function MarketScene({ session, live, bookPressure, depthProfile, priceLevels }:
 
       const volumeLoad = Math.min(1.35, Math.max(.18, session.volume / 4000000));
       // The visible force grows with cumulative traded volume.
-      for (let row = 0; row < 8; row += 1) {
-        const z = .16 + row * .105;
+      for (let row = 0; row < 9; row += 1) {
+        const z = .12 + row * .1;
         const front = frontAt(z);
-        const unitCount = 5 + Math.floor(volumeLoad * 6);
+        const unitCount = 8 + Math.floor(volumeLoad * 7);
         for (let unit = 0; unit < unitCount; unit += 1) {
-          const depthPhase = (time * (.16 + (unit % 3) * .025) + row * .23 + unit * .31) % 1;
-          const redHome = -.82 + unit * .082;
-          const greenHome = .82 - unit * .082;
+          const depthPhase = (time * (.22 + (unit % 3) * .035) + row * .23 + unit * .23) % 1;
+          const redHome = -.84 + unit * .067;
+          const greenHome = .84 - unit * .067;
           const redAdvance = Math.min(front - .13, redHome + depthPhase * .44 * (1 - pressure * .45));
           const greenAdvance = Math.max(front + .13, greenHome - depthPhase * .44 * (1 + pressure * .45));
           const bob = Math.abs(Math.sin(time * 5 + unit + row));
@@ -477,7 +477,7 @@ function MarketScene({ session, live, bookPressure, depthProfile, priceLevels }:
         }
       }
 
-      const airCount = Math.floor(Math.max(0, volumeLoad - .36) * 7);
+      const airCount = Math.floor(Math.max(0, volumeLoad - .28) * 9);
       for (let i = 0; i < airCount; i += 1) {
         const z = .18 + (i % 4) * .18;
         const orbit = Math.sin(time * .42 + i * 1.9) * .16;
@@ -490,6 +490,70 @@ function MarketScene({ session, live, bookPressure, depthProfile, priceLevels }:
           drone(redX, z, "red", time * 5 + i);
           drone(greenX, z + .025, "green", time * 5 + i + 2);
         }
+      }
+
+      // Rifle and machine-gun tracers continuously cross the live price front.
+      const fireCount = Math.min(76, 24 + Math.floor(volumeLoad * 30) + Math.floor(Math.abs(pressure) * 16));
+      for (let i = 0; i < fireCount; i += 1) {
+        const redFires = i % 2 === 0;
+        const z = .1 + ((i * 37) % 86) / 100;
+        const front = frontAt(z);
+        const speed = .68 + (i % 7) * .07;
+        const travel = (time * speed + i * .173) % 1;
+        const fromX = front + (redFires ? -.52 - (i % 4) * .035 : .52 + (i % 4) * .035);
+        const toX = front + (redFires ? .16 : -.16);
+        const x = fromX + (toX - fromX) * travel;
+        const previousTravel = Math.max(0, travel - .09);
+        const previousX = fromX + (toX - fromX) * previousTravel;
+        const lift = .018 + Math.sin(travel * Math.PI) * (.025 + (i % 3) * .009);
+        const point = project(x, z, lift);
+        const previous = project(previousX, z, lift);
+        const tracer = redFires ? "rgba(255,166,95,.96)" : "rgba(120,255,190,.96)";
+        context.beginPath(); context.moveTo(previous.x, previous.y); context.lineTo(point.x, point.y);
+        context.strokeStyle = tracer; context.lineWidth = 1 + z * 1.5;
+        context.shadowBlur = 8; context.shadowColor = tracer; context.stroke(); context.shadowBlur = 0;
+        if (travel < .045) {
+          const muzzle = project(fromX, z, .025);
+          context.fillStyle = "rgba(255,241,170,.95)";
+          context.beginPath(); context.arc(muzzle.x, muzzle.y, 2 + z * 3, 0, Math.PI * 2); context.fill();
+        }
+      }
+
+      // Heavy shells fly in visible arcs and detonate on the opposing side.
+      const shellCount = 5 + Math.floor(volumeLoad * 5);
+      for (let i = 0; i < shellCount; i += 1) {
+        const redFires = i % 2 === 0;
+        const z = .18 + (i % 6) * .125;
+        const front = frontAt(z);
+        const travel = (time * (.24 + (i % 3) * .035) + i * .29) % 1;
+        const fromX = front + (redFires ? -.68 : .68);
+        const toX = front + (redFires ? .22 : -.22);
+        const x = fromX + (toX - fromX) * travel;
+        const lift = .08 + Math.sin(travel * Math.PI) * (.3 + (i % 2) * .08);
+        const shell = project(x, z, lift);
+        const shellTrail = project(fromX + (toX - fromX) * Math.max(0, travel - .035), z, lift * .96);
+        context.beginPath(); context.moveTo(shellTrail.x, shellTrail.y); context.lineTo(shell.x, shell.y);
+        context.strokeStyle = "rgba(255,232,170,.9)"; context.lineWidth = 2 + z; context.stroke();
+        context.fillStyle = redFires ? "#ff8a65" : "#8affc4";
+        context.beginPath(); context.arc(shell.x, shell.y, 2.2 + z * 1.8, 0, Math.PI * 2); context.fill();
+        if (travel > .91) {
+          const impact = project(toX, z, .03);
+          const blast = (travel - .91) / .09;
+          const radius = (1 - blast) * (14 + z * 13) + 3;
+          const glow = context.createRadialGradient(impact.x, impact.y, 0, impact.x, impact.y, radius);
+          glow.addColorStop(0, "rgba(255,249,199,.98)"); glow.addColorStop(.3, "rgba(255,133,61,.82)"); glow.addColorStop(1, "rgba(255,48,24,0)");
+          context.fillStyle = glow; context.beginPath(); context.arc(impact.x, impact.y, radius, 0, Math.PI * 2); context.fill();
+        }
+      }
+
+      // Smoke columns linger around repeated impact zones.
+      for (let i = 0; i < 12; i += 1) {
+        const z = .14 + ((i * 23) % 78) / 100;
+        const phase = (time * .14 + i * .19) % 1;
+        const point = project(frontAt(z) + Math.sin(i * 2.3) * .11, z, .03 + phase * .22);
+        const size = (3 + phase * 12) * (.45 + z);
+        context.fillStyle = `rgba(68,70,62,${(1 - phase) * .25})`;
+        context.beginPath(); context.arc(point.x, point.y, size, 0, Math.PI * 2); context.fill();
       }
 
       // Price/order-book ticks ripple down the line without restarting the scene.
