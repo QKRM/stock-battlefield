@@ -33,6 +33,8 @@ type MarketData = {
   };
   source: string;
 };
+type MarketEvent = { type: "SIDECAR_BUY" | "SIDECAR_SELL" | "CIRCUIT_BREAKER"; title: string; date: string; time: string; durationMinutes: number; message: string };
+interface BeforeInstallPromptEvent extends Event { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> }
 
 type StockCode = "000660" | "005930";
 
@@ -90,10 +92,10 @@ function formatDate(value: string) {
   return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function MarketScene({ session, live, bookPressure, depthProfile, priceLevels, stockName }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] }; priceLevels: { current: number; asks: Array<{ price: number; quantity: number }>; bids: Array<{ price: number; quantity: number }> }; stockName: string }) {
+function MarketScene({ session, live, bookPressure, depthProfile, priceLevels, stockName, halted }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] }; priceLevels: { current: number; asks: Array<{ price: number; quantity: number }>; bids: Array<{ price: number; quantity: number }> }; stockName: string; halted: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const sceneState = useRef({ session, live, bookPressure, depthProfile, priceLevels });
-  sceneState.current = { session, live, bookPressure, depthProfile, priceLevels };
+  const sceneState = useRef({ session, live, bookPressure, depthProfile, priceLevels, halted });
+  sceneState.current = { session, live, bookPressure, depthProfile, priceLevels, halted };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -105,7 +107,7 @@ function MarketScene({ session, live, bookPressure, depthProfile, priceLevels, s
     let smoothPressure = sceneState.current.bookPressure;
 
     const draw = () => {
-      const { session, live, bookPressure, depthProfile, priceLevels } = sceneState.current;
+      const { session, live, bookPressure, depthProfile, priceLevels, halted } = sceneState.current;
       smoothPressure += (bookPressure - smoothPressure) * .035;
       const rect = canvas.getBoundingClientRect();
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -608,7 +610,7 @@ function MarketScene({ session, live, bookPressure, depthProfile, priceLevels, s
       vignette.addColorStop(1, "rgba(0,0,0,.68)");
       context.fillStyle = vignette;
       context.fillRect(0, 0, width, height);
-      frame += 1;
+      frame += halted ? 0 : 1;
       animation = requestAnimationFrame(draw);
     };
     draw();
@@ -627,6 +629,10 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const [marketEvents, setMarketEvents] = useState<MarketEvent[]>([]);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installHint, setInstallHint] = useState(false);
+  const [installed, setInstalled] = useState(false);
   const stock = STOCKS[stockCode];
   const fallbackData = fallbackDataByStock[stockCode];
   const fallbackSessions = fallbackData.sessions;
@@ -665,12 +671,44 @@ export default function Home() {
     };
   }, [loadData]);
 
+  useEffect(() => {
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    const standalone = window.matchMedia("(display-mode: standalone)").matches;
+    setInstalled(standalone);
+    const capturePrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const markInstalled = () => { setInstalled(true); setInstallPrompt(null); };
+    window.addEventListener("beforeinstallprompt", capturePrompt);
+    window.addEventListener("appinstalled", markInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", capturePrompt);
+      window.removeEventListener("appinstalled", markInstalled);
+    };
+  }, []);
+
   const sessions = useMemo(() => data.sessions.slice(-7), [data.sessions]);
   const session = useMemo(() => {
     if (selected === "LIVE") return sessions.at(-1) ?? fallbackSessions.at(-1)!;
     return sessions.find((item) => item.date === selected) ?? sessions.at(-1) ?? fallbackSessions.at(-1)!;
   }, [selected, sessions]);
   const live = selected === "LIVE";
+  useEffect(() => {
+    let cancelled = false;
+    const loadEvents = async () => {
+      try {
+        const response = await fetch(`/api/market-events?date=${session.date}`);
+        const result = await response.json() as { events?: MarketEvent[] };
+        if (!cancelled) setMarketEvents(result.events ?? []);
+      } catch {
+        if (!cancelled) setMarketEvents([]);
+      }
+    };
+    loadEvents();
+    const timer = live ? window.setInterval(loadEvents, 30000) : 0;
+    return () => { cancelled = true; if (timer) window.clearInterval(timer); };
+  }, [live, session.date]);
   useEffect(() => {
     if (!live) {
       setReplayIndex(Math.max(0, session.points.length - 1));
@@ -721,6 +759,12 @@ export default function Home() {
   }, [live, replayIndex, session]);
   const activeSession = live ? session : replaySession;
   const replayPoint = activeSession.points.at(-1);
+  const eventCursor = live ? now.getTime() : replayPoint?.time ?? 0;
+  const activeAlert = marketEvents.find((event) => {
+    const startsAt = new Date(`${event.date}T${event.time}:00+09:00`).getTime();
+    return eventCursor >= startsAt && eventCursor < startsAt + event.durationMinutes * 60000;
+  });
+  const alertName = activeAlert?.type === "CIRCUIT_BREAKER" ? "서킷브레이커" : activeAlert?.type === "SIDECAR_BUY" ? "매수 사이드카" : "매도 사이드카";
   const quotePrice = live ? data.quote.price : activeSession.close;
   const changeRate = live ? data.quote.changeRate : activeSession.change;
   const replayBook = useMemo(() => Array.from({ length: 5 }, (_, index) => {
@@ -745,6 +789,17 @@ export default function Home() {
   const refreshIn = Math.max(0, 10 - Math.floor((now.getTime() - lastUpdated.getTime()) / 1000));
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
   const forceTier = activeSession.volume > 2800000 ? "총력전 · 공중전력 투입" : activeSession.volume > 1500000 ? "대규모 기계화 증원" : activeSession.volume > 600000 ? "장갑·보급 부대 투입" : "초기 보병 교전";
+
+  const installApp = async () => {
+    if (installPrompt) {
+      await installPrompt.prompt();
+      await installPrompt.userChoice;
+      setInstallPrompt(null);
+      return;
+    }
+    setInstallHint(true);
+    window.setTimeout(() => setInstallHint(false), 3500);
+  };
 
   return (
     <div className="app-shell">
@@ -787,7 +842,7 @@ export default function Home() {
         </div>}
 
         <section className="battlefield" aria-label={`${stock.name} 시장 전장`}>
-          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} priceLevels={{ current: quotePrice, asks: bookLevels.map((level) => level.ask), bids: bookLevels.map((level) => level.bid) }} stockName={stock.name} />
+          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} priceLevels={{ current: quotePrice, asks: bookLevels.map((level) => level.ask), bids: bookLevels.map((level) => level.bid) }} stockName={stock.name} halted={Boolean(activeAlert)} />
           <div className="scene-grid" />
           <div className="scene-top-left"><b>KST {live ? now.toLocaleTimeString("ko-KR", { hour12: false }) : replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour12: false }) : "09:00:00"}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
           <div className="scene-price"><small>{stock.englishName} · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
@@ -796,6 +851,11 @@ export default function Home() {
           <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>
           <div className="front-quote-strip"><span className="ask">매도 1호가 <b>{won(bestAsk)}</b></span><strong>현재 전선 <em>{won(quotePrice)}</em></strong><span className="bid">매수 1호가 <b>{won(bestBid)}</b></span></div>
           <div className="live-badge"><span /> {live ? (data.quote.marketStatus === "OPEN" ? "LIVE MARKET" : "LATEST CLOSE") : "HISTORICAL"}</div>
+          {activeAlert && <div className={`market-emergency ${activeAlert.type === "CIRCUIT_BREAKER" ? "circuit" : "sidecar"}`} role="alert" aria-live="assertive">
+            <i className="shockwave one" /><i className="shockwave two" /><i className="blast-core" />
+            <div className="emergency-stripes" />
+            <div className="emergency-copy"><small>⚠ KRX MARKET EMERGENCY ⚠</small><strong>경고!! {alertName} 발동!!</strong><b>{activeAlert.message}</b><span>{activeAlert.date} {activeAlert.time} · KRX 공식 발동 기록</span></div>
+          </div>}
         </section>
 
           <section className="floating-panels" aria-label="호가 및 체결 정보">
@@ -826,6 +886,8 @@ export default function Home() {
         </section>
         <p className="disclaimer">본 화면은 정보 제공용 시각화이며 투자 권유가 아닙니다. 실시간 시세는 제공처 사정에 따라 지연될 수 있습니다.</p>
       </main>
+      {!installed && <button className="pwa-install" onClick={installApp} aria-label="Stock Battlefield 앱 설치"><span>⇩</span><div><small>INSTALL PWA</small><b>앱 설치</b></div></button>}
+      {installHint && <div className="install-hint" role="status">브라우저 메뉴에서 <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 선택하세요.</div>}
     </div>
   );
 }
