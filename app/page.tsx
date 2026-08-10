@@ -152,7 +152,7 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
       const tank = (x: number, z: number, color: "red" | "green", bounce: number) => {
         const base = project(x, z);
         const direction = color === "red" ? 1 : -1;
-        const s = (9.5 + z * 5) * base.scale;
+        const s = (11.5 + z * 6) * base.scale;
         const lift = bounce * base.scale;
         const bright = color === "green" ? "#55e89a" : "#ee5967";
         const body = color === "green" ? "#216b45" : "#792d36";
@@ -173,7 +173,7 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
       const soldier = (x: number, z: number, color: "red" | "green", stride: number) => {
         const base = project(x, z);
         const direction = color === "red" ? 1 : -1;
-        const s = (4.2 + z * 3.6) * base.scale;
+        const s = (5.8 + z * 4.5) * base.scale;
         const bright = color === "green" ? "#72f2aa" : "#ff727e";
         const armor = color === "green" ? "#174f34" : "#60242c";
         context.save();
@@ -270,12 +270,34 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
       context.closePath();
       context.clip();
 
-      const field = context.createRadialGradient(width * (buyPower > .5 ? .65 : .35), horizon, 25, width * .5, height * .64, width * .76);
-      field.addColorStop(0, buyPower > .5 ? "rgba(49,112,66,.92)" : "rgba(113,48,49,.86)");
-      field.addColorStop(.42, "rgba(47,67,44,.96)");
-      field.addColorStop(1, "rgba(11,17,13,.99)");
+      const field = context.createLinearGradient(0, 0, width, 0);
+      field.addColorStop(0, "rgba(87,44,36,.98)");
+      field.addColorStop(.38, "rgba(91,67,42,.96)");
+      field.addColorStop(.5 + pressure * .13, "rgba(58,70,43,.96)");
+      field.addColorStop(.66, "rgba(39,85,53,.96)");
+      field.addColorStop(1, "rgba(13,49,31,.99)");
       context.fillStyle = field;
       context.fillRect(0, horizon, width, height - horizon);
+
+      const groundLight = context.createRadialGradient(width * .5, horizon + height * .13, 20, width * .5, height * .6, width * .72);
+      groundLight.addColorStop(0, "rgba(190,205,130,.18)");
+      groundLight.addColorStop(.6, "rgba(37,53,32,.06)");
+      groundLight.addColorStop(1, "rgba(0,0,0,.48)");
+      context.fillStyle = groundLight;
+      context.fillRect(0, horizon, width, height - horizon);
+
+      // Low-poly hills and craters give the flat grid a battlefield silhouette.
+      for (let i = 0; i < 22; i += 1) {
+        const z = .08 + ((i * 37) % 88) / 100;
+        const x = -1 + ((i * 53) % 190) / 95;
+        if (Math.abs(x) < .19) continue;
+        const base = project(x, z);
+        const size = (7 + (i % 5) * 4) * base.scale;
+        context.fillStyle = x < 0 ? "rgba(67,38,30,.35)" : "rgba(19,65,40,.38)";
+        polygon([{x:base.x-size*1.8,y:base.y},{x:base.x-size*.4,y:base.y-size*.8},{x:base.x+size*.25,y:base.y-size*1.5},{x:base.x+size*1.6,y:base.y}],context.fillStyle as string);
+        context.strokeStyle = "rgba(0,0,0,.2)";
+        context.beginPath(); context.ellipse(base.x, base.y + size * .12, size * 1.1, size * .28, 0, 0, Math.PI * 2); context.stroke();
+      }
 
       context.strokeStyle = "rgba(205,222,175,.1)";
       context.lineWidth = 1;
@@ -296,8 +318,36 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
         context.stroke();
       }
 
+      // Supply roads cross the map and reinforce the tilted camera depth.
+      const drawRoad = (offset: number, color: string, widthFactor: number) => {
+        context.beginPath();
+        for (let z = 0; z <= 1; z += .025) {
+          const x = offset + (z - .5) * .92 + Math.sin(z * 5.2) * .025;
+          const point = project(x, z);
+          if (z === 0) context.moveTo(point.x, point.y); else context.lineTo(point.x, point.y);
+        }
+        context.strokeStyle = color;
+        context.lineWidth = widthFactor;
+        context.stroke();
+      };
+      drawRoad(-.66, "rgba(220,204,158,.18)", 8);
+      drawRoad(-.66, "rgba(247,231,180,.26)", 1.2);
+      drawRoad(.52, "rgba(187,220,186,.15)", 7);
+      drawRoad(.52, "rgba(213,244,211,.24)", 1.1);
+
+      for (let i = 0; i < 42; i += 1) {
+        const z = .12 + ((i * 29) % 82) / 100;
+        const side = i % 2 ? -1 : 1;
+        const x = side * (.42 + ((i * 17) % 45) / 100);
+        const tree = project(x, z);
+        const s = (2.8 + z * 5.5) * tree.scale;
+        context.fillStyle = side < 0 ? "rgba(48,32,25,.75)" : "rgba(12,52,30,.82)";
+        context.fillRect(tree.x - s * .12, tree.y - s * .9, s * .24, s * .9);
+        polygon([{x:tree.x,y:tree.y-s*2.4},{x:tree.x-s*.75,y:tree.y-s*.65},{x:tree.x+s*.75,y:tree.y-s*.65}],side < 0 ? "rgba(77,48,34,.78)" : "rgba(22,82,47,.82)");
+      }
+
       // The moving price front: real session direction controls which army advances.
-      const frontAt = (z: number) => frontlineShift * (.28 + z * .72) + Math.sin(time * .72) * .065 * (1 - Math.abs(pressure) * .35) + Math.sin(z * 11 + time * 1.7) * .035;
+      const frontAt = (z: number) => frontlineShift * (.28 + z * .72) + (z - .42) * .18 + Math.sin(time * .72) * .055 * (1 - Math.abs(pressure) * .35) + Math.sin(z * 7 + time * 1.35) * .055;
       context.beginPath();
       for (let z = 0; z <= 1.02; z += .025) {
         const point = project(frontAt(z), z, .015 + Math.sin(time * 3 + z * 18) * .006);
@@ -313,16 +363,30 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
       context.stroke();
       context.shadowBlur = 0;
 
+      // Trench lines track both sides of the active price boundary.
+      for (const side of [-1, 1]) {
+        context.beginPath();
+        for (let z = .05; z <= 1; z += .025) {
+          const point = project(frontAt(z) + side * (.13 + z * .04), z);
+          if (z === .05) context.moveTo(point.x, point.y); else context.lineTo(point.x, point.y);
+        }
+        context.setLineDash([5, 7]);
+        context.strokeStyle = side < 0 ? "rgba(255,113,120,.42)" : "rgba(103,255,170,.42)";
+        context.lineWidth = 2.2;
+        context.stroke();
+      }
+      context.setLineDash([]);
+
       // Paired walls travel back and forth across the battlefield.
       for (let row = 0; row < 12; row += 1) {
         const z = .08 + row * .075;
         const front = frontAt(z);
         const clash = Math.sin(time * 2.5 + row * .8) * .018;
-        const scale = 10 + z * 13;
+        const scale = 6 + z * 9;
         const askDepth = depthProfile.asks[row % Math.max(1, depthProfile.asks.length)] ?? .5;
         const bidDepth = depthProfile.bids[row % Math.max(1, depthProfile.bids.length)] ?? .5;
-        block(front - .085 - clash, z, scale, 13 + askDepth * 34, "red", .86);
-        block(front + .085 + clash, z, scale, 13 + bidDepth * 34, "green", .9);
+        block(front - .075 - clash, z, scale, 5 + askDepth * 15, "red", .82);
+        block(front + .075 + clash, z, scale, 5 + bidDepth * 15, "green", .86);
       }
 
       const volumeLoad = Math.min(1.35, Math.max(.18, session.volume / 4000000));
@@ -330,13 +394,13 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
       for (let row = 0; row < 8; row += 1) {
         const z = .16 + row * .105;
         const front = frontAt(z);
-        const unitCount = 3 + Math.floor(volumeLoad * 5);
+        const unitCount = 5 + Math.floor(volumeLoad * 6);
         for (let unit = 0; unit < unitCount; unit += 1) {
           const depthPhase = (time * (.16 + (unit % 3) * .025) + row * .23 + unit * .31) % 1;
-          const redHome = -.92 + unit * .105;
-          const greenHome = .92 - unit * .105;
-          const redAdvance = Math.min(front - .15, redHome + depthPhase * .34 * (1 - pressure * .45));
-          const greenAdvance = Math.max(front + .15, greenHome - depthPhase * .34 * (1 + pressure * .45));
+          const redHome = -.82 + unit * .082;
+          const greenHome = .82 - unit * .082;
+          const redAdvance = Math.min(front - .13, redHome + depthPhase * .44 * (1 - pressure * .45));
+          const greenAdvance = Math.max(front + .13, greenHome - depthPhase * .44 * (1 + pressure * .45));
           const bob = Math.abs(Math.sin(time * 5 + unit + row));
           const unitType = (unit + row * 2) % 8;
           if (unitType === 0 || unitType === 6) {
@@ -368,6 +432,32 @@ function MarketScene({ session, live, bookPressure, depthProfile }: { session: S
           drone(redX, z, "red", time * 5 + i);
           drone(greenX, z + .025, "green", time * 5 + i + 2);
         }
+      }
+
+      // Price/order-book ticks ripple down the line without restarting the scene.
+      const pulseZ = (time * .36) % 1;
+      const pulsePoint = project(frontAt(pulseZ), pulseZ, .04);
+      context.beginPath();
+      context.arc(pulsePoint.x, pulsePoint.y, 5 + pulseZ * 17, 0, Math.PI * 2);
+      context.strokeStyle = pressure >= 0 ? "rgba(113,255,177,.75)" : "rgba(255,111,122,.75)";
+      context.lineWidth = 2;
+      context.shadowBlur = 15;
+      context.shadowColor = context.strokeStyle;
+      context.stroke();
+      context.shadowBlur = 0;
+
+      for (let i = 0; i < 4; i += 1) {
+        const burst = (Math.sin(time * 2.1 + i * 2.7) + 1) / 2;
+        if (burst < .82) continue;
+        const z = .22 + i * .19;
+        const point = project(frontAt(z) + Math.sin(i * 4.3) * .07, z, .08);
+        const radius = (burst - .8) * (32 + z * 24);
+        const glow = context.createRadialGradient(point.x, point.y, 0, point.x, point.y, Math.max(2, radius));
+        glow.addColorStop(0, "rgba(255,245,185,.96)");
+        glow.addColorStop(.35, "rgba(255,143,64,.7)");
+        glow.addColorStop(1, "rgba(255,73,35,0)");
+        context.fillStyle = glow;
+        context.beginPath(); context.arc(point.x, point.y, Math.max(2, radius), 0, Math.PI * 2); context.fill();
       }
 
       // Clash sparks move down the front line and make the battle feel alive.
