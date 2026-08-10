@@ -34,46 +34,51 @@ type MarketData = {
   source: string;
 };
 
-const fallbackSessions: Session[] = Array.from({ length: 7 }, (_, index) => {
-  const day = new Date(Date.now() - (6 - index) * 86400000);
-  const base = 1380000 + index * 6500 + Math.sin(index * 1.7) * 27000;
-  const points = Array.from({ length: 48 }, (_, i) => ({
-    time: day.setHours(9, i * 8, 0, 0),
-    price: Math.round(base + Math.sin(i / 5) * 18000 + Math.cos(i / 2.8) * 6000),
-    volume: Math.round(26000 + Math.abs(Math.sin(i / 7)) * 74000),
-  }));
-  const prices = points.map((point) => point.price);
-  return {
-    date: new Date(points[0].time).toISOString().slice(0, 10),
-    open: prices[0],
-    high: Math.max(...prices),
-    low: Math.min(...prices),
-    close: prices.at(-1)!,
-    change: ((prices.at(-1)! - prices[0]) / prices[0]) * 100,
-    volume: points.reduce((sum, point) => sum + point.volume, 0),
-    points,
-  };
-});
+type StockCode = "000660" | "005930";
 
-const fallbackData: MarketData = {
-  quote: {
-    price: fallbackSessions.at(-1)!.close,
-    change: fallbackSessions.at(-1)!.close - fallbackSessions.at(-1)!.open,
-    changeRate: fallbackSessions.at(-1)!.change,
-    open: fallbackSessions.at(-1)!.open,
-    high: fallbackSessions.at(-1)!.high,
-    low: fallbackSessions.at(-1)!.low,
-    volume: fallbackSessions.at(-1)!.volume,
-    tradedAt: new Date().toISOString(),
-    marketStatus: "CLOSE",
-  },
-  sessions: fallbackSessions,
-  orderBook: {
-    asks: Array.from({ length: 5 }, (_, index) => ({ price: fallbackSessions.at(-1)!.close + (index + 1) * 1000, quantity: 1800 + index * 730 })),
-    bids: Array.from({ length: 5 }, (_, index) => ({ price: fallbackSessions.at(-1)!.close - (index + 1) * 1000, quantity: 2400 + index * 640 })),
-    delayed: true,
-  },
-  source: "DEMO FEED",
+const STOCKS = {
+  "000660": { symbol: "000660" as const, name: "SK하이닉스", englishName: "SK HYNIX", shortName: "Hynix", fallbackBase: 1380000, tick: 1000, volumeScale: 1 },
+  "005930": { symbol: "005930" as const, name: "삼성전자", englishName: "SAMSUNG ELEC", shortName: "Samsung", fallbackBase: 182000, tick: 100, volumeScale: 5.4 },
+};
+
+function makeFallbackData(code: StockCode): MarketData {
+  const stock = STOCKS[code];
+  const sessions: Session[] = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(Date.now() - (6 - index) * 86400000);
+    const base = stock.fallbackBase * (1 + index * .0045 + Math.sin(index * 1.7) * .018);
+    const points = Array.from({ length: 48 }, (_, i) => ({
+      time: day.setHours(9, i * 8, 0, 0),
+      price: Math.round((base + Math.sin(i / 5) * stock.fallbackBase * .013 + Math.cos(i / 2.8) * stock.fallbackBase * .004) / stock.tick) * stock.tick,
+      volume: Math.round((26000 + Math.abs(Math.sin(i / 7)) * 74000) * stock.volumeScale),
+    }));
+    const prices = points.map((point) => point.price);
+    return {
+      date: new Date(points[0].time).toISOString().slice(0, 10),
+      open: prices[0],
+      high: Math.max(...prices),
+      low: Math.min(...prices),
+      close: prices.at(-1)!,
+      change: ((prices.at(-1)! - prices[0]) / prices[0]) * 100,
+      volume: points.reduce((sum, point) => sum + point.volume, 0),
+      points,
+    };
+  });
+  const latest = sessions.at(-1)!;
+  return {
+    quote: { price: latest.close, change: latest.close - latest.open, changeRate: latest.change, open: latest.open, high: latest.high, low: latest.low, volume: latest.volume, tradedAt: new Date().toISOString(), marketStatus: "CLOSE" },
+    sessions,
+    orderBook: {
+      asks: Array.from({ length: 5 }, (_, index) => ({ price: latest.close + (index + 1) * stock.tick, quantity: Math.round((1800 + index * 730) * stock.volumeScale) })),
+      bids: Array.from({ length: 5 }, (_, index) => ({ price: latest.close - (index + 1) * stock.tick, quantity: Math.round((2400 + index * 640) * stock.volumeScale) })),
+      delayed: true,
+    },
+    source: "DEMO FEED",
+  };
+}
+
+const fallbackDataByStock: Record<StockCode, MarketData> = {
+  "000660": makeFallbackData("000660"),
+  "005930": makeFallbackData("005930"),
 };
 
 const won = (value: number) => `${Math.round(value).toLocaleString("ko-KR")}원`;
@@ -85,7 +90,7 @@ function formatDate(value: string) {
   return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function MarketScene({ session, live, bookPressure, depthProfile, priceLevels }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] }; priceLevels: { current: number; asks: Array<{ price: number; quantity: number }>; bids: Array<{ price: number; quantity: number }> } }) {
+function MarketScene({ session, live, bookPressure, depthProfile, priceLevels, stockName }: { session: Session; live: boolean; bookPressure: number; depthProfile: { asks: number[]; bids: number[] }; priceLevels: { current: number; asks: Array<{ price: number; quantity: number }>; bids: Array<{ price: number; quantity: number }> }; stockName: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneState = useRef({ session, live, bookPressure, depthProfile, priceLevels });
   sceneState.current = { session, live, bookPressure, depthProfile, priceLevels };
@@ -610,21 +615,25 @@ function MarketScene({ session, live, bookPressure, depthProfile, priceLevels }:
     return () => cancelAnimationFrame(animation);
   }, []);
 
-  return <canvas ref={canvasRef} className="battle-canvas" aria-label="SK하이닉스 매수·매도 압력 시각화" />;
+  return <canvas ref={canvasRef} className="battle-canvas" aria-label={`${stockName} 매수·매도 압력 시각화`} />;
 }
 
 export default function Home() {
-  const [data, setData] = useState<MarketData>(fallbackData);
+  const [stockCode, setStockCode] = useState<StockCode>("000660");
+  const [data, setData] = useState<MarketData>(fallbackDataByStock["000660"]);
   const [selected, setSelected] = useState("LIVE");
   const [now, setNow] = useState(new Date());
   const [connected, setConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
+  const stock = STOCKS[stockCode];
+  const fallbackData = fallbackDataByStock[stockCode];
+  const fallbackSessions = fallbackData.sessions;
 
   const loadData = useCallback(async () => {
     try {
-      const response = await fetch("/api/market", { cache: "no-store" });
+      const response = await fetch(`/api/market?symbol=${stockCode}`, { cache: "no-store" });
       if (!response.ok) throw new Error("market feed unavailable");
       const next = (await response.json()) as MarketData;
       if (next.sessions?.length) {
@@ -635,7 +644,16 @@ export default function Home() {
     } catch {
       setConnected(false);
     }
-  }, []);
+  }, [fallbackData.orderBook, stockCode]);
+
+  const selectStock = useCallback((code: StockCode) => {
+    if (code === stockCode) return;
+    setStockCode(code);
+    setData(fallbackDataByStock[code]);
+    setSelected("LIVE");
+    setReplayPlaying(false);
+    setConnected(false);
+  }, [stockCode]);
 
   useEffect(() => {
     loadData();
@@ -709,10 +727,10 @@ export default function Home() {
     const pulse = .65 + Math.abs(Math.sin((replayPoint?.time ?? 0) / 470000 + index * 1.37));
     const baseQuantity = Math.max(200, (replayPoint?.volume ?? 10000) / 7);
     return {
-      ask: { price: quotePrice + (index + 1) * 1000, quantity: Math.round(baseQuantity * pulse * (1 - changeRate / 18)) },
-      bid: { price: quotePrice - (index + 1) * 1000, quantity: Math.round(baseQuantity * (1.8 - pulse / 2) * (1 + changeRate / 18)) },
+      ask: { price: quotePrice + (index + 1) * stock.tick, quantity: Math.round(baseQuantity * pulse * (1 - changeRate / 18)) },
+      bid: { price: quotePrice - (index + 1) * stock.tick, quantity: Math.round(baseQuantity * (1.8 - pulse / 2) * (1 + changeRate / 18)) },
     };
-  }), [changeRate, quotePrice, replayPoint?.time, replayPoint?.volume]);
+  }), [changeRate, quotePrice, replayPoint?.time, replayPoint?.volume, stock.tick]);
   const bookLevels = live
     ? Array.from({ length: 5 }, (_, index) => ({ ask: data.orderBook.asks[index], bid: data.orderBook.bids[index] })).filter((level) => level.ask && level.bid)
     : replayBook;
@@ -722,8 +740,8 @@ export default function Home() {
   const sellPressure = 100 - buyPressure;
   const bookPressure = Math.max(-1, Math.min(1, (buyPressure - 50) / 34));
   const maxBookQuantity = Math.max(1, ...bookLevels.flatMap((level) => [level.ask.quantity, level.bid.quantity]));
-  const bestAsk = bookLevels[0]?.ask.price ?? quotePrice + 1000;
-  const bestBid = bookLevels[0]?.bid.price ?? quotePrice - 1000;
+  const bestAsk = bookLevels[0]?.ask.price ?? quotePrice + stock.tick;
+  const bestBid = bookLevels[0]?.bid.price ?? quotePrice - stock.tick;
   const refreshIn = Math.max(0, 10 - Math.floor((now.getTime() - lastUpdated.getTime()) / 1000));
   const pressureLabel = Math.abs(changeRate) < 0.35 ? "팽팽한 공방" : changeRate > 0 ? "매수 우위" : "매도 우위";
   const forceTier = activeSession.volume > 2800000 ? "총력전 · 공중전력 투입" : activeSession.volume > 1500000 ? "대규모 기계화 증원" : activeSession.volume > 600000 ? "장갑·보급 부대 투입" : "초기 보병 교전";
@@ -732,20 +750,23 @@ export default function Home() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><i /><i /></span><strong>stockhedge</strong><em>KOREA DATA</em></div>
-        <div className="only-view"><span /> SK하이닉스 BATTLEFIELD</div>
-        <div className="connection"><i className={connected ? "online" : ""} /> {connected ? "10 SEC LIVE FEED" : "CONNECTING"}<b>KOSPI · 000660 · {refreshIn}s</b></div>
+        <div className="only-view"><span /> {stock.name} BATTLEFIELD</div>
+        <div className="connection"><i className={connected ? "online" : ""} /> {connected ? "10 SEC LIVE FEED" : "CONNECTING"}<b>KOSPI · {stock.symbol} · {refreshIn}s</b></div>
       </header>
 
       <aside className="sidebar">
         <p className="side-title">CURRENT VIEW</p>
-        <div className="side-link selected"><span>◩</span><div><b>Hynix Battlefield</b><small>실시간 매수·매도 전선</small></div></div>
+        <div className="side-link selected"><span>◩</span><div><b>{stock.shortName} Battlefield</b><small>실시간 매수·매도 전선</small></div></div>
         <div className="side-explain"><span>RED</span><p>매도 세력 · 전진 시 주가 압박</p><span>GREEN</span><p>매수 세력 · 전진 시 주가 상승 압력</p><span>WHITE LINE</span><p>두 세력이 충돌하는 현재 가격 전선</p></div>
         <div className="side-footer"><span>DATA FEED</span><b>{connected ? "CONNECTED" : "FALLBACK"}</b><small>10초마다 시세 갱신 · 전투는 실시간 렌더링</small></div>
       </aside>
 
       <main className="content" id="battlefield">
         <section className="heading-row">
-          <div><div className="eyebrow"><span className="ticker-dot" /> 000660 · KOSPI</div><h1>SK하이닉스 Battlefield</h1><p>호가벽, 거래량, 가격 압력을 하나의 시장 전장으로 시각화합니다.</p></div>
+          <div><div className="eyebrow"><span className="ticker-dot" /> {stock.symbol} · KOSPI</div><h1>{stock.name} Battlefield</h1><p>호가벽, 거래량, 가격 압력을 하나의 시장 전장으로 시각화합니다.</p></div>
+          <div className="stock-switcher" role="group" aria-label="종목 선택">
+            {(Object.values(STOCKS) as Array<(typeof STOCKS)[StockCode]>).map((item) => <button key={item.symbol} className={stockCode === item.symbol ? "selected" : ""} onClick={() => selectStock(item.symbol)}><span>{item.symbol}</span><b>{item.name}</b></button>)}
+          </div>
         </section>
 
         <div className="date-switcher" role="group" aria-label="조회 일자">
@@ -765,11 +786,11 @@ export default function Home() {
           <b>{Math.floor(replayIndex) + 1} / {session.points.length}</b>
         </div>}
 
-        <section className="battlefield" aria-label="SK하이닉스 시장 전장">
-          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} priceLevels={{ current: quotePrice, asks: bookLevels.map((level) => level.ask), bids: bookLevels.map((level) => level.bid) }} />
+        <section className="battlefield" aria-label={`${stock.name} 시장 전장`}>
+          <MarketScene session={activeSession} live={live} bookPressure={bookPressure} depthProfile={{ asks: bookLevels.map((level) => level.ask.quantity / maxBookQuantity), bids: bookLevels.map((level) => level.bid.quantity / maxBookQuantity) }} priceLevels={{ current: quotePrice, asks: bookLevels.map((level) => level.ask), bids: bookLevels.map((level) => level.bid) }} stockName={stock.name} />
           <div className="scene-grid" />
           <div className="scene-top-left"><b>KST {live ? now.toLocaleTimeString("ko-KR", { hour12: false }) : replayPoint ? new Date(replayPoint.time).toLocaleTimeString("ko-KR", { hour12: false }) : "09:00:00"}</b><span>{live ? "실시간 전장" : `${session.date} 장중 리플레이`}</span></div>
-          <div className="scene-price"><small>SK HYNIX · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
+          <div className="scene-price"><small>{stock.englishName} · {live ? "LIVE" : "REPLAY"}</small><strong>{won(quotePrice)}</strong><b className={changeRate >= 0 ? "up" : "down"}>{changeRate >= 0 ? "▲" : "▼"} {Math.abs(changeRate).toFixed(2)}%</b></div>
           <div className="scene-pressure"><small>MARKET PRESSURE</small><strong>{pressureLabel}</strong><span>{forceTier}</span></div>
           <div className="wall-label sell"><small>SELL WALL</small><strong>{sellPressure.toFixed(1)}%</strong><span>매도 압력</span></div>
           <div className="wall-label buy"><small>BUY WALL</small><strong>{buyPressure.toFixed(1)}%</strong><span>매수 압력</span></div>

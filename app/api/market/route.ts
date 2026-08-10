@@ -2,18 +2,26 @@ export const dynamic = "force-dynamic";
 
 const toNumber = (value: unknown) => Number(String(value ?? "0").replaceAll(",", "")) || 0;
 
-export async function GET() {
+const STOCKS = {
+  "000660": { naver: "000660", yahoo: "000660.KS" },
+  "005930": { naver: "005930", yahoo: "005930.KS" },
+} as const;
+
+export async function GET(request: Request) {
   try {
+    const symbol = new URL(request.url).searchParams.get("symbol") ?? "000660";
+    if (!(symbol in STOCKS)) return Response.json({ error: "Unsupported stock symbol" }, { status: 400 });
+    const stockConfig = STOCKS[symbol as keyof typeof STOCKS];
     const [naverResponse, yahooResponse, orderBookResponse] = await Promise.all([
-      fetch("https://polling.finance.naver.com/api/realtime/domestic/stock/000660", {
+      fetch(`https://polling.finance.naver.com/api/realtime/domestic/stock/${stockConfig.naver}`, {
         headers: { Referer: "https://finance.naver.com/", "User-Agent": "Mozilla/5.0" },
         cache: "no-store",
       }),
-      fetch("https://query1.finance.yahoo.com/v8/finance/chart/000660.KS?range=10d&interval=5m", {
+      fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${stockConfig.yahoo}?range=10d&interval=5m`, {
         headers: { "User-Agent": "Mozilla/5.0" },
         cache: "no-store",
       }),
-      fetch("https://finance.naver.com/item/sise.naver?code=000660&asktype=5", {
+      fetch(`https://finance.naver.com/item/sise.naver?code=${stockConfig.naver}&asktype=5`, {
         headers: { Referer: "https://finance.naver.com/", "User-Agent": "Mozilla/5.0" },
         cache: "no-store",
       }),
